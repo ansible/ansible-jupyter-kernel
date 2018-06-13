@@ -5,8 +5,14 @@ from subprocess import check_output
 import re
 import yaml
 from subprocess import Popen, STDOUT, PIPE
+import logging
+import traceback
+
+from modules import modules
 
 __version__ = '0.0.1'
+
+logger = logging.getLogger('ansible_kernel.kernel')
 
 version_pat = re.compile(r'version (\d+(\.\d+)+)')
 
@@ -45,31 +51,41 @@ class AnsibleKernel(Kernel):
 
     def do_execute(self, code, silent, store_history=True,
                    user_expressions=None, allow_stdin=False):
+        logger = logging.getLogger('ansible_kernel.kernel.do_execute')
         self.silent = silent
         if not code.strip():
             return {'status': 'ok', 'execution_count': self.execution_count,
                     'payload': [], 'user_expressions': {}}
 
+        logger.debug('code %r', code)
         code_data = yaml.load(code)
+        logger.debug('code_data %r', code_data)
 
         for module, args in code_data.items():
             if isinstance(args, dict):
+                logger.debug('is dict')
                 m_args = ' '.join(['{0}="{1}"'.format(k, v) for k, v in args.items()])
             elif isinstance(args, basestring):
+                logger.debug('is string')
                 m_args = args
             elif args is None:
+                logger.debug('is None')
                 m_args = ''
             else:
+                logger.debug('is not supported %s', type(args))
                 raise Exception("Not supported type {0}".format(type(args)))
             interrupted = False
             try:
-                #self.process_output(' '.join(['ansible', '-m', module, "-a", "{0}".format(m_args), '-i', 'localhost', 'localhost']))
+                logger.debug("command %s", " ".join(['ansible', '-m', module, "-a", "{0}".format(m_args), '-i', 'localhost', 'localhost']))
                 p = Popen(['ansible', '-m', module, "-a", "{0}".format(m_args), '-i', 'localhost', 'localhost'], stdout=PIPE, stderr=STDOUT)
                 p.wait()
                 exitcode = p.returncode
-                self.process_output(p.communicate()[0])
+                logger.debug('exitcode %s', exitcode)
+                output = p.communicate()[0]
+                logger.debug('output %s', output)
+                self.process_output(output)
             except KeyboardInterrupt:
-                self.bashwrapper._expect_prompt()
+                logger.error(traceback.format_exc())
 
         if interrupted:
             return {'status': 'abort', 'execution_count': self.execution_count}
@@ -93,10 +109,13 @@ class AnsibleKernel(Kernel):
                    'cursor_end': cursor_pos, 'metadata': dict(),
                    'status': 'ok'}
 
+        logger = logging.getLogger('ansible_kernel.kernel.do_complete')
+        logger.debug('code %r', code)
+
         if not code or code[-1] == ' ':
             return default
 
-        tokens = code.replace(';', ' ').split()
+        tokens = code.split()
         if not tokens:
             return default
 
@@ -104,18 +123,9 @@ class AnsibleKernel(Kernel):
         token = tokens[-1]
         start = cursor_pos - len(token)
 
-        if token[0] == '$':
-            # complete variables
-            cmd = 'compgen -A arrayvar -A export -A variable %s' % token[1:]  # strip leading $
-            output = self.bashwrapper.run_command(cmd).rstrip()
-            completions = set(output.split())
-            # append matches including leading $
-            matches.extend(['$' + c for c in completions])
-        else:
-            # complete functions and builtins
-            cmd = 'compgen -cdfa %s' % token
-            output = self.bashwrapper.run_command(cmd).rstrip()
-            matches.extend(output.split())
+        for module in modules:
+            if module.startswith(token):
+                matches.append(module)
 
         if not matches:
             return default
@@ -124,3 +134,34 @@ class AnsibleKernel(Kernel):
         return {'matches': sorted(matches), 'cursor_start': start,
                 'cursor_end': cursor_pos, 'metadata': dict(),
                 'status': 'ok'}
+
+    def do_inspect(self, code, cursor_pos, detail_level=0):
+        logger = logging.getLogger('ansible_kernel.kernel.do_inspect')
+        logger.debug("code %s", code)
+        logger.debug("cursor_pos %s", cursor_pos)
+        logger.debug("detail_level %s", detail_level)
+
+        data = dict()
+
+        code_data = yaml.load(code)
+
+        logger.debug("code_data %s", code_data)
+
+        if isinstance(code_data, basestring):
+            module = code_data
+        elif isinstance(code_data, dict):
+            module = code_data.keys()[0]
+        else:
+            logger.warn('code type not supported %s', type(code_data))
+            return {'status': 'ok', 'data': {}, 'metadata': {}, 'found': False}
+
+        logger.debug("command %s", " ".join(['ansible-doc', '-t', 'module', module]))
+        p = Popen(['ansible-doc', '-t', 'module', module], stdout=PIPE, stderr=STDOUT)
+        p.wait()
+        exitcode = p.returncode
+        logger.debug('exitcode %s', exitcode)
+        output = p.communicate()[0]
+        logger.debug('output %s', output)
+        data['text/plain'] = output
+
+        return {'status': 'ok', 'data': data, 'metadata': {}, 'found': True}
