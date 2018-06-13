@@ -39,6 +39,13 @@ class AnsibleKernel(Kernel):
                      'mimetype': 'text/yaml',
                      'file_extension': '.yml'}
 
+    help_links = [
+        {
+            'text': 'Ansible Reference',
+            'url': 'https://docs.ansible.com/ansible/latest/index.html'
+        }
+    ]
+
     def __init__(self, **kwargs):
         Kernel.__init__(self, **kwargs)
 
@@ -59,7 +66,31 @@ class AnsibleKernel(Kernel):
 
         logger.debug('code %r', code)
         code_data = yaml.load(code)
-        logger.debug('code_data %r', code_data)
+        logger.debug('code_data %r %s', code_data)
+        logger.debug('code_data type: %s', type(code_data))
+
+        if isinstance(code_data, basestring):
+            if (code_data.endswith("?")):
+                module = code_data[:-1]
+            else:
+                module = code_data
+            data = self.get_module_doc(module)
+            payload = dict(
+                source='page',
+                data=data,
+                start=0)
+            logging.debug('payload %s', payload)
+            return {'status': 'ok', 'execution_count': self.execution_count,
+                    'payload': [payload], 'user_expressions': {}}
+        elif isinstance(code_data, list):
+            code_data = code_data[0]
+        elif isinstance(code_data, dict):
+            code_data = code_data
+        elif code_data is None:
+            return {'status': 'ok', 'execution_count': self.execution_count,
+                    'payload': [], 'user_expressions': {}}
+        else:
+            logger.error('code_data %s unsupported type', type(code_data))
 
         for module, args in code_data.items():
             if isinstance(args, dict):
@@ -89,8 +120,6 @@ class AnsibleKernel(Kernel):
 
         if interrupted:
             return {'status': 'abort', 'execution_count': self.execution_count}
-
-        exitcode = 1
 
         if exitcode:
             error_content = {'execution_count': self.execution_count,
@@ -155,6 +184,14 @@ class AnsibleKernel(Kernel):
             logger.warn('code type not supported %s', type(code_data))
             return {'status': 'ok', 'data': {}, 'metadata': {}, 'found': False}
 
+        data.update(self.get_module_doc(module))
+
+        return {'status': 'ok', 'data': data, 'metadata': {}, 'found': True}
+
+    def get_module_doc(self, module):
+
+        data = {}
+
         logger.debug("command %s", " ".join(['ansible-doc', '-t', 'module', module]))
         p = Popen(['ansible-doc', '-t', 'module', module], stdout=PIPE, stderr=STDOUT)
         p.wait()
@@ -164,4 +201,4 @@ class AnsibleKernel(Kernel):
         logger.debug('output %s', output)
         data['text/plain'] = output
 
-        return {'status': 'ok', 'data': data, 'metadata': {}, 'found': True}
+        return data
