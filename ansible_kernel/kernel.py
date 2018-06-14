@@ -2,11 +2,13 @@ from ipykernel.kernelbase import Kernel
 
 from subprocess import check_output
 
+import os
 import re
 import yaml
 from subprocess import Popen, STDOUT, PIPE
 import logging
 import traceback
+import tempfile
 
 from modules import modules
 
@@ -48,6 +50,7 @@ class AnsibleKernel(Kernel):
 
     def __init__(self, **kwargs):
         Kernel.__init__(self, **kwargs)
+        self.inventory = "localhost"
 
     def process_output(self, output):
         if not self.silent:
@@ -65,6 +68,27 @@ class AnsibleKernel(Kernel):
                     'payload': [], 'user_expressions': {}}
 
         logger.debug('code %r', code)
+
+        if code.strip().startswith("#inventory"):
+            return self.do_inventory(code)
+        elif code.strip().startswith("#task"):
+            return self.do_execute_module(code)
+        elif code.strip().startswith("#play"):
+            logger.error("#play not supported")
+            return {'status': 'ok', 'execution_count': self.execution_count,
+                    'payload': [], 'user_expressions': {}}
+        else:
+            return self.do_execute_module(code)
+
+    def do_inventory(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_inventory')
+        self.inventory = code
+        logger.info("inventory set to %s", self.inventory)
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
+
+    def do_execute_module(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_execute_module')
         code_data = yaml.load(code)
         logger.debug('code_data %r %s', code_data)
         logger.debug('code_data type: %s', type(code_data))
@@ -92,10 +116,20 @@ class AnsibleKernel(Kernel):
         else:
             logger.error('code_data %s unsupported type', type(code_data))
 
+        target = 'all'
+
+        if 'host' in code_data:
+            target = code_data['host']
+            del code_data['host']
+
+        if 'name' in code_data:
+            del code_data['name']
+
         for module, args in code_data.items():
             if isinstance(args, dict):
                 logger.debug('is dict')
-                m_args = ' '.join(['{0}="{1}"'.format(k, v) for k, v in args.items()])
+                m_args = ' '.join(['{0}="{1}"'.format(k,
+                                                      ",".join(v) if isinstance(v, list) else v) for k, v in args.items()])
             elif isinstance(args, basestring):
                 logger.debug('is string')
                 m_args = args
@@ -107,8 +141,11 @@ class AnsibleKernel(Kernel):
                 raise Exception("Not supported type {0}".format(type(args)))
             interrupted = False
             try:
-                logger.debug("command %s", " ".join(['ansible', '-m', module, "-a", "{0}".format(m_args), '-i', 'localhost', 'localhost']))
-                p = Popen(['ansible', '-m', module, "-a", "{0}".format(m_args), '-i', 'localhost', 'localhost'], stdout=PIPE, stderr=STDOUT)
+                inventory_handle, inventory_name = tempfile.mkstemp(prefix="inventory")
+                os.write(inventory_handle, self.inventory)
+                os.close(inventory_handle)
+                logger.debug("command %s", " ".join(['ansible', '-m', module, "-a", "{0}".format(m_args), '-i', inventory_name, target]))
+                p = Popen(['ansible', '-m', module, "-a", "{0}".format(m_args), '-i', inventory_name, target], stdout=PIPE, stderr=STDOUT)
                 p.wait()
                 exitcode = p.returncode
                 logger.debug('exitcode %s', exitcode)
@@ -117,6 +154,8 @@ class AnsibleKernel(Kernel):
                 self.process_output(output)
             except KeyboardInterrupt:
                 logger.error(traceback.format_exc())
+            finally:
+                os.unlink(inventory_name)
 
         if interrupted:
             return {'status': 'abort', 'execution_count': self.execution_count}
@@ -169,6 +208,20 @@ class AnsibleKernel(Kernel):
         logger.debug("code %s", code)
         logger.debug("cursor_pos %s", cursor_pos)
         logger.debug("detail_level %s", detail_level)
+
+        if code.strip().startswith("#inventory"):
+            logger.info("#inentory not supported")
+            return {'status': 'ok', 'data': {}, 'metadata': {}, 'found': True}
+        elif code.strip().startswith("#task"):
+            return self.do_inspect_module(code, cursor_pos, detail_level)
+        elif code.strip().startswith("#play"):
+            logger.info("#play not supported")
+            return {'status': 'ok', 'data': {}, 'metadata': {}, 'found': True}
+        else:
+            return self.do_inspect_module(code, cursor_pos, detail_level)
+
+    def do_inspect_module(self, code, cursor_pos, detail_level=0):
+        logger = logging.getLogger('ansible_kernel.kernel.do_inspect_module')
 
         data = dict()
 
