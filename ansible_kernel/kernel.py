@@ -11,6 +11,10 @@ import traceback
 import tempfile
 
 from modules import modules
+from module_args import module_args
+from task_args import task_args
+
+TASK_ARGS_MODULES = modules + task_args
 
 __version__ = '0.0.1'
 
@@ -52,8 +56,8 @@ class AnsibleKernel(Kernel):
         Kernel.__init__(self, **kwargs)
         logger = logging.getLogger('ansible_kernel.kernel.__init__')
         self.temp_dir = tempfile.mkdtemp(prefix="ansible_kernel_playbook")
-        self.current_play = {}
-        self.current_task = []
+        self.current_play = yaml.dump(dict(hosts='all', gather_facts=False))
+        self.current_task = None
         logger.debug(self.temp_dir)
 
     def process_output(self, output):
@@ -208,11 +212,54 @@ class AnsibleKernel(Kernel):
                    'cursor_end': cursor_pos, 'metadata': dict(),
                    'status': 'ok'}
 
-        logger = logging.getLogger('ansible_kernel.kernel.do_complete')
+        if code.strip().startswith("#inventory"):
+            return default
+        elif code.strip().startswith("#host_vars"):
+            return default
+        elif code.strip().startswith("#group_vars"):
+            return default
+        elif code.strip().startswith("#task"):
+            return self.do_complete_task(code, cursor_pos)
+        elif code.strip().startswith("#play"):
+            return self.do_complete_play(code, cursor_pos)
+        else:
+            return self.do_complete_task(code, cursor_pos)
+
+    def do_complete_task(self, code, cursor_pos):
+
+        default = {'matches': [], 'cursor_start': 0,
+                   'cursor_end': cursor_pos, 'metadata': dict(),
+                   'status': 'ok'}
+
+        logger = logging.getLogger('ansible_kernel.kernel.do_complete_task')
         logger.debug('code %r', code)
 
         if not code or code[-1] == ' ':
             return default
+
+        found_module = False
+        code_data = None
+        try:
+            code_data = yaml.load(code)
+        except Exception:
+            try:
+                code_data = yaml.load(code + ":")
+            except Exception:
+                code_data = None
+
+        if code_data is not None:
+            logger.debug('code_data %s', code_data)
+
+            if isinstance(code_data, list) and len(code_data) > 0:
+                code_data = code_data[0]
+            if isinstance(code_data, dict):
+                for key in code_data.keys():
+                    if key in modules:
+                        module_name = key
+                        found_module = True
+                        break
+
+        logger.debug('found_module %s', found_module)
 
         tokens = code.split()
         if not tokens:
@@ -222,9 +269,17 @@ class AnsibleKernel(Kernel):
         token = tokens[-1]
         start = cursor_pos - len(token)
 
-        for module in modules:
-            if module.startswith(token):
-                matches.append(module)
+        logger.debug('token %s', token)
+
+        if not found_module:
+
+            for module in TASK_ARGS_MODULES:
+                if module.startswith(token):
+                    matches.append(module)
+        else:
+            for arg in module_args.get(module_name, []):
+                if arg.startswith(token):
+                    matches.append(arg)
 
         if not matches:
             return default
@@ -233,6 +288,20 @@ class AnsibleKernel(Kernel):
         return {'matches': sorted(matches), 'cursor_start': start,
                 'cursor_end': cursor_pos, 'metadata': dict(),
                 'status': 'ok'}
+
+    def do_complete_play(self, code, cursor_pos):
+
+        default = {'matches': [], 'cursor_start': 0,
+                   'cursor_end': cursor_pos, 'metadata': dict(),
+                   'status': 'ok'}
+
+        logger = logging.getLogger('ansible_kernel.kernel.do_complete_task')
+        logger.debug('code %r', code)
+
+        if not code or code[-1] == ' ':
+            return default
+
+        return default
 
     def do_inspect(self, code, cursor_pos, detail_level=0):
         logger = logging.getLogger('ansible_kernel.kernel.do_inspect')
