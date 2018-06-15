@@ -50,7 +50,11 @@ class AnsibleKernel(Kernel):
 
     def __init__(self, **kwargs):
         Kernel.__init__(self, **kwargs)
-        self.inventory = "localhost"
+        logger = logging.getLogger('ansible_kernel.kernel.__init__')
+        self.temp_dir = tempfile.mkdtemp(prefix="ansible_kernel_playbook")
+        self.current_play = {}
+        self.current_task = []
+        logger.debug(self.temp_dir)
 
     def process_output(self, output):
         if not self.silent:
@@ -71,24 +75,61 @@ class AnsibleKernel(Kernel):
 
         if code.strip().startswith("#inventory"):
             return self.do_inventory(code)
+        elif code.strip().startswith("#host_vars"):
+            return self.do_host_vars(code)
+        elif code.strip().startswith("#group_vars"):
+            return self.do_group_vars(code)
         elif code.strip().startswith("#task"):
-            return self.do_execute_module(code)
+            return self.do_execute_task(code)
         elif code.strip().startswith("#play"):
-            logger.error("#play not supported")
-            return {'status': 'ok', 'execution_count': self.execution_count,
-                    'payload': [], 'user_expressions': {}}
+            return self.do_execute_play(code)
         else:
-            return self.do_execute_module(code)
+            return self.do_execute_task(code)
 
     def do_inventory(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_inventory')
-        self.inventory = code
-        logger.info("inventory set to %s", self.inventory)
+        logger.info("inventory set to %s", code)
+        with open(os.path.join(self.temp_dir, 'inventory'), 'w') as f:
+            f.write(code)
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
-    def do_execute_module(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute_module')
+    def do_host_vars(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_host_vars')
+        host = code.strip().splitlines()[0][len('#host_vars'):].strip()
+        logger.debug("host %s", host)
+        host_vars = os.path.join(self.temp_dir, 'host_vars')
+        if not os.path.exists(host_vars):
+            os.mkdir(host_vars)
+        with open(os.path.join(host_vars, host), 'w') as f:
+            f.write(code)
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
+
+    def do_group_vars(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_group_vars')
+        group = code.strip().splitlines()[0][len('#group_vars'):].strip()
+        logger.debug("group %s", group)
+        group_vars = os.path.join(self.temp_dir, 'group_vars')
+        if not os.path.exists(group_vars):
+            os.mkdir(group_vars)
+        with open(os.path.join(group_vars, group), 'w') as f:
+            f.write(code)
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
+
+    def do_execute_play(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_execute_play')
+        code_data = yaml.load(code)
+        logger.debug('code_data %r %s', code_data)
+        logger.debug('code_data type: %s', type(code_data))
+        self.current_play = code
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
+
+    def do_execute_task(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
+        self.current_task = code
         code_data = yaml.load(code)
         logger.debug('code_data %r %s', code_data)
         logger.debug('code_data type: %s', type(code_data))
@@ -116,46 +157,36 @@ class AnsibleKernel(Kernel):
         else:
             logger.error('code_data %s unsupported type', type(code_data))
 
-        target = 'all'
+        interrupted = False
+        try:
 
-        if 'host' in code_data:
-            target = code_data['host']
-            del code_data['host']
+            playbook = []
 
-        if 'name' in code_data:
-            del code_data['name']
+            current_play = yaml.load(self.current_play)
+            playbook.append(current_play)
+            tasks = current_play['tasks'] = current_play.get('tasks', [])
 
-        for module, args in code_data.items():
-            if isinstance(args, dict):
-                logger.debug('is dict')
-                m_args = ' '.join(['{0}="{1}"'.format(k,
-                                                      ",".join(v) if isinstance(v, list) else v) for k, v in args.items()])
-            elif isinstance(args, basestring):
-                logger.debug('is string')
-                m_args = args
-            elif args is None:
-                logger.debug('is None')
-                m_args = ''
-            else:
-                logger.debug('is not supported %s', type(args))
-                raise Exception("Not supported type {0}".format(type(args)))
-            interrupted = False
-            try:
-                inventory_handle, inventory_name = tempfile.mkstemp(prefix="inventory")
-                os.write(inventory_handle, self.inventory)
-                os.close(inventory_handle)
-                logger.debug("command %s", " ".join(['ansible', '-m', module, "-a", "{0}".format(m_args), '-i', inventory_name, target]))
-                p = Popen(['ansible', '-m', module, "-a", "{0}".format(m_args), '-i', inventory_name, target], stdout=PIPE, stderr=STDOUT)
-                p.wait()
-                exitcode = p.returncode
-                logger.debug('exitcode %s', exitcode)
-                output = p.communicate()[0]
-                logger.debug('output %s', output)
-                self.process_output(output)
-            except KeyboardInterrupt:
-                logger.error(traceback.format_exc())
-            finally:
-                os.unlink(inventory_name)
+            tasks.append(yaml.load(self.current_task))
+
+            logger.debug(yaml.safe_dump(playbook, default_flow_style=False))
+
+            with open(os.path.join(self.temp_dir, 'playbook'), 'w') as f:
+                f.write(yaml.safe_dump(playbook, default_flow_style=False))
+
+            command = ['ansible-playbook',
+                       '-i',
+                       os.path.join(self.temp_dir, 'inventory'),
+                       os.path.join(self.temp_dir, 'playbook')]
+            logger.debug("command %s", " ".join(command))
+            p = Popen(command, stdout=PIPE, stderr=STDOUT)
+            p.wait()
+            exitcode = p.returncode
+            logger.debug('exitcode %s', exitcode)
+            output = p.communicate()[0]
+            logger.debug('output %s', output)
+            self.process_output(output)
+        except KeyboardInterrupt:
+            logger.error(traceback.format_exc())
 
         if interrupted:
             return {'status': 'abort', 'execution_count': self.execution_count}
