@@ -13,6 +13,7 @@ import tempfile
 from modules import modules
 from module_args import module_args
 from task_args import task_args
+from play_args import play_args
 
 TASK_ARGS_MODULES = modules + task_args
 
@@ -301,7 +302,27 @@ class AnsibleKernel(Kernel):
         if not code or code[-1] == ' ':
             return default
 
-        return default
+        tokens = code.split()
+        if not tokens:
+            return default
+
+        matches = []
+        token = tokens[-1]
+        start = cursor_pos - len(token)
+
+        logger.debug('token %s', token)
+
+        for arg in play_args:
+            if arg.startswith(token):
+                matches.append(arg)
+
+        if not matches:
+            return default
+        matches = [m for m in matches if m.startswith(token)]
+
+        return {'matches': sorted(matches), 'cursor_start': start,
+                'cursor_end': cursor_pos, 'metadata': dict(),
+                'status': 'ok'}
 
     def do_inspect(self, code, cursor_pos, detail_level=0):
         logger = logging.getLogger('ansible_kernel.kernel.do_inspect')
