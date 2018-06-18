@@ -1,7 +1,9 @@
+from __future__ import print_function
 from ipykernel.kernelbase import Kernel
 
 from subprocess import check_output
 
+import pkg_resources
 import os
 import re
 import yaml
@@ -10,10 +12,16 @@ import logging
 import traceback
 import tempfile
 
+import zmq
+from zmq.eventloop.zmqstream import ZMQStream
+
 from modules import modules
 from module_args import module_args
 from task_args import task_args
 from play_args import play_args
+
+from ConfigParser import SafeConfigParser
+
 
 TASK_ARGS_MODULES = modules + task_args
 
@@ -57,11 +65,45 @@ class AnsibleKernel(Kernel):
         Kernel.__init__(self, **kwargs)
         logger = logging.getLogger('ansible_kernel.kernel.__init__')
         self.temp_dir = tempfile.mkdtemp(prefix="ansible_kernel_playbook")
-        self.current_play = yaml.dump(dict(hosts='all', gather_facts=False))
+        with open(os.path.join(self.temp_dir, 'ansible.cfg'), 'w') as f:
+            config = SafeConfigParser()
+            config.add_section('defaults')
+            config.set('defaults', 'callback_whitelist', 'ansible_kernel_helper')
+            config.set('defaults', 'callback_plugins', pkg_resources.resource_filename('ansible_kernel', 'plugins/callback'))
+            config.set('defaults', 'roles_path', pkg_resources.resource_filename('ansible_kernel', 'roles'))
+            config.set('defaults', 'inventory', 'inventory')
+            config.write(f)
+        self.current_play = yaml.dump(dict(hosts='all',
+                                           gather_facts=False))
+        self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
 
+        context = zmq.Context.instance()
+        self.pause_socket = context.socket(zmq.REP)
+        self.pause_socket.bind("tcp://*:5555")
+        self.status_socket = context.socket(zmq.PULL)
+        self.status_socket.bind("tcp://*:5556")
+
+        self.pause_stream = ZMQStream(self.pause_socket)
+        self.status_stream = ZMQStream(self.status_socket)
+
+        self.pause_stream.on_recv(self.recv_pause)
+        self.status_stream.on_recv(self.recv_status)
+
+    def recv_status(self, msg):
+        logger = logging.getLogger('ansible_kernel.kernel.recv_status')
+        logger.info(msg)
+        self.process_output(msg)
+
+    def recv_pause(self, msg):
+        logger = logging.getLogger('ansible_kernel.kernel.recv_pause')
+        logger.info("waiting...")
+
     def process_output(self, output):
+        logger = logging.getLogger('ansible_kernel.kernel.process_output')
+        logger.info("output %s", output)
+
         if not self.silent:
 
             # Send standard output
@@ -129,6 +171,24 @@ class AnsibleKernel(Kernel):
         logger.debug('code_data %r %s', code_data)
         logger.debug('code_data type: %s', type(code_data))
         self.current_play = code
+
+        playbook = []
+
+        current_play = yaml.load(self.current_play)
+        playbook.append(current_play)
+        tasks = current_play['tasks'] = current_play.get('tasks', [])
+        current_play['roles'] = current_play.get('roles', [])
+        current_play['roles'].insert(0, 'ansible_kernel_helpers')
+
+        tasks.append({'pause_for_kernel': {'host': '127.0.0.1', 'port': 5555, 'task_num': self.tasks_counter}})
+        tasks.append({'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
+        self.tasks_counter += 1
+
+        logger.debug(yaml.safe_dump(playbook, default_flow_style=False))
+
+        with open(os.path.join(self.temp_dir, 'playbook'), 'w') as f:
+            f.write(yaml.safe_dump(playbook, default_flow_style=False))
+
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
@@ -168,47 +228,26 @@ class AnsibleKernel(Kernel):
         interrupted = False
         try:
 
-            playbook = []
-
-            current_play = yaml.load(self.current_play)
-            playbook.append(current_play)
-            tasks = current_play['tasks'] = current_play.get('tasks', [])
+            tasks = []
 
             tasks.append(yaml.load(self.current_task))
+            tasks.append({'pause_for_kernel': {'host': '127.0.0.1', 'port': 5555, 'task_num': self.tasks_counter}})
+            tasks.append({'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
+            self.tasks_counter += 1
 
-            logger.debug(yaml.safe_dump(playbook, default_flow_style=False))
+            logger.debug(yaml.safe_dump(tasks, default_flow_style=False))
 
-            with open(os.path.join(self.temp_dir, 'playbook'), 'w') as f:
-                f.write(yaml.safe_dump(playbook, default_flow_style=False))
+            with open(os.path.join(self.temp_dir, 'next_task{0}.yml'.format(self.tasks_counter - 2)), 'w') as f:
+                f.write(yaml.safe_dump(tasks, default_flow_style=False))
 
-            command = ['ansible-playbook',
-                       '-i',
-                       os.path.join(self.temp_dir, 'inventory'),
-                       os.path.join(self.temp_dir, 'playbook')]
-            logger.debug("command %s", " ".join(command))
-            p = Popen(command, stdout=PIPE, stderr=STDOUT)
-            p.wait()
-            exitcode = p.returncode
-            logger.debug('exitcode %s', exitcode)
-            output = p.communicate()[0]
-            logger.debug('output %s', output)
-            self.process_output(output)
         except KeyboardInterrupt:
             logger.error(traceback.format_exc())
 
         if interrupted:
             return {'status': 'abort', 'execution_count': self.execution_count}
 
-        if exitcode:
-            error_content = {'execution_count': self.execution_count,
-                             'ename': '', 'evalue': str(exitcode), 'traceback': []}
-
-            self.send_response(self.iopub_socket, 'error', error_content)
-            error_content['status'] = 'error'
-            return error_content
-        else:
-            return {'status': 'ok', 'execution_count': self.execution_count,
-                    'payload': [], 'user_expressions': {}}
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
 
     def do_complete(self, code, cursor_pos):
         code = code[:cursor_pos]
