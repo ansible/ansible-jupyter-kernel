@@ -4,13 +4,18 @@ from ipykernel.kernelbase import Kernel
 from subprocess import check_output
 
 import pkg_resources
+import atexit
+import time
 import os
 import re
 import yaml
+import threading
 from subprocess import Popen, STDOUT, PIPE
 import logging
 import traceback
 import tempfile
+from Queue import Queue
+from collections import namedtuple
 
 import zmq
 from zmq.eventloop.zmqstream import ZMQStream
@@ -21,6 +26,10 @@ from task_args import task_args
 from play_args import play_args
 
 from ConfigParser import SafeConfigParser
+from zmq.eventloop.ioloop import IOLoop
+
+StatusMessage = namedtuple('StatusMessage', ['message'])
+TaskCompletionMessage = namedtuple('TaskCompletionMessage', ['task_num'])
 
 
 TASK_ARGS_MODULES = modules + task_args
@@ -30,6 +39,55 @@ __version__ = '0.0.1'
 logger = logging.getLogger('ansible_kernel.kernel')
 
 version_pat = re.compile(r'version (\d+(\.\d+)+)')
+
+
+class AnsibleKernelHelpersThread(object):
+
+    def __init__(self, queue):
+        self.queue = queue
+        self.io_loop = IOLoop(make_current=False)
+        context = zmq.Context.instance()
+        self.pause_socket = context.socket(zmq.REP)
+        self.pause_socket.bind("tcp://*:5555")
+        self.status_socket = context.socket(zmq.PULL)
+        self.status_socket.bind("tcp://*:5556")
+
+        self.pause_stream = ZMQStream(self.pause_socket, self.io_loop)
+        self.status_stream = ZMQStream(self.status_socket, self.io_loop)
+
+        self.pause_stream.on_recv(self.recv_pause)
+        self.status_stream.on_recv(self.recv_status)
+        self.thread = threading.Thread(target=self._thread_main)
+        self.thread.daemon = True
+
+    def start(self):
+        logger.info('thread.start')
+        self.thread.start()
+        atexit.register(self.stop)
+
+    def stop(self):
+        logger.info('thread.stop start')
+        if not self.thread.is_alive():
+            return
+        self.io_loop.add_callback(self.io_loop.stop)
+        self.thread.join()
+        logger.info('thread.stop end')
+
+    def recv_status(self, msg):
+        logger = logging.getLogger('ansible_kernel.kernel.recv_status')
+        logger.info(msg)
+        self.queue.put(StatusMessage(msg))
+
+    def recv_pause(self, msg):
+        logger = logging.getLogger('ansible_kernel.kernel.recv_pause')
+        logger.info("completed %s waiting...", msg)
+        self.queue.put(TaskCompletionMessage(msg))
+
+    def _thread_main(self):
+        """The inner loop that's actually run in a thread"""
+        self.io_loop.make_current()
+        self.io_loop.start()
+        self.io_loop.close(all_fds=True)
 
 
 class AnsibleKernel(Kernel):
@@ -78,27 +136,9 @@ class AnsibleKernel(Kernel):
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
-
-        context = zmq.Context.instance()
-        self.pause_socket = context.socket(zmq.REP)
-        self.pause_socket.bind("tcp://*:5555")
-        self.status_socket = context.socket(zmq.PULL)
-        self.status_socket.bind("tcp://*:5556")
-
-        self.pause_stream = ZMQStream(self.pause_socket)
-        self.status_stream = ZMQStream(self.status_socket)
-
-        self.pause_stream.on_recv(self.recv_pause)
-        self.status_stream.on_recv(self.recv_status)
-
-    def recv_status(self, msg):
-        logger = logging.getLogger('ansible_kernel.kernel.recv_status')
-        logger.info(msg)
-        self.process_output(msg)
-
-    def recv_pause(self, msg):
-        logger = logging.getLogger('ansible_kernel.kernel.recv_pause')
-        logger.info("waiting...")
+        self.queue = Queue()
+        self.helper = AnsibleKernelHelpersThread(self.queue)
+        self.helper.start()
 
     def process_output(self, output):
         logger = logging.getLogger('ansible_kernel.kernel.process_output')
@@ -186,8 +226,23 @@ class AnsibleKernel(Kernel):
 
         logger.debug(yaml.safe_dump(playbook, default_flow_style=False))
 
-        with open(os.path.join(self.temp_dir, 'playbook'), 'w') as f:
+        with open(os.path.join(self.temp_dir, 'playbook.yml'), 'w') as f:
             f.write(yaml.safe_dump(playbook, default_flow_style=False))
+
+        command = ['ansible-playbook', 'playbook.yml']
+
+        logger.info("command %s", command)
+
+        self.ansible_process = Popen(command, cwd=self.temp_dir)
+
+        while True:
+            logger.info("getting message")
+            msg = self.queue.get()
+            logger.info(msg)
+            if isinstance(msg, StatusMessage):
+                self.process_output(str(msg.message))
+            elif isinstance(msg, TaskCompletionMessage):
+                break
 
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
