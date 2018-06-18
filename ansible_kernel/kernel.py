@@ -135,15 +135,18 @@ class AnsibleKernel(Kernel):
     def do_execute_task(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
         self.current_task = code
-        code_data = yaml.load(code)
+        try:
+            code_data = yaml.load(code)
+        except Exception:
+            code_data = code
         logger.debug('code_data %r %s', code_data)
         logger.debug('code_data type: %s', type(code_data))
 
         if isinstance(code_data, basestring):
             if (code_data.endswith("?")):
-                module = code_data[:-1]
+                module = code_data[:-1].split()[-1]
             else:
-                module = code_data
+                module = code_data.split()[-1]
             data = self.get_module_doc(module)
             payload = dict(
                 source='page',
