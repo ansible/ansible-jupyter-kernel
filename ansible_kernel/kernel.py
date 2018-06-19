@@ -414,12 +414,11 @@ class AnsibleKernel(Kernel):
         logger.debug('token %s', token)
 
         if not found_module:
-
             for module in TASK_ARGS_MODULES:
                 if module.startswith(token):
                     matches.append(module)
         else:
-            for arg in module_args.get(module_name, []):
+            for arg in module_args.get(module_name, []) + task_args:
                 if arg.startswith(token):
                     matches.append(arg)
 
@@ -494,6 +493,9 @@ class AnsibleKernel(Kernel):
         if isinstance(code_data, basestring):
             module = code_data
         elif isinstance(code_data, dict):
+            for arg in task_args:
+                if arg in code_data:
+                    del code_data[arg]
             module = code_data.keys()[0]
         else:
             logger.warn('code type not supported %s', type(code_data))
