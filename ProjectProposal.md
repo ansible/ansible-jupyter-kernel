@@ -69,19 +69,37 @@ Initial Project Evaluation
 
 Prototype
 ---------
-* Time: 1 week (50% done)
+* Time: 1 week (100% done)
 * 1 resource: Python/Javascript
-* Result: Run contents of a notebook cell as an Ansible ad-hoc command and
+* Result: Run contents of a notebook cell as a task in an Ansible playbook and
     display output of after it finishes on the notebook.
 
 Tasks:
 
-- Add ansible ad-hoc kernel.  See ipython/ipykernel for an example of a kernel. (wip)
+- Add ansible kernel that keeps a play context running. See ipython/ipykernel for an example of a kernel. (done)
 - Add tab completion for ansible modules (done)
-- Add tab completion for ansible module arguments
+- Add tab completion for ansible module arguments (done)
 - Add documentation integration (done)
 - Add export to task list for use with include_tasks (done)
 - Rewrite a few of the Ansible for Networks tutorials with this
+
+
+Release 0 Beta (Early Access)
+-----------------------------
+* Time: 3 weeks
+* 2 resources: 1 python, 1 tester, +community
+* Result:  Improve prototype to a useful point and release as a stand-alone module
+for use the Juypter notebooks and add to AWX.
+
+Tasks:
+
+- Push module to PYPI
+- Add awx integration
+- Test by converting tutorials to notebooks
+- Write blog post
+- Write AnsibleFest talk
+- Demo recordings
+
 
 Release 1 Product (Proposed for 3.4)
 ------------------------------------
@@ -92,7 +110,6 @@ Release 1 Product (Proposed for 3.4)
 Tasks:
 
 - Playbook importing
-- Add ansible kernel that keeps a play context running. See ipython/ipykernel for an example of a kernel.
 - Change branding to Tower with Jupyter
 - Integrate with Tower
 - Add RBAC
