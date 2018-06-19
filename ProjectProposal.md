@@ -163,12 +163,16 @@ Risks
 Risk Mitigation
 ---------------
 
+- Very few modifications to Juypter repos  are needed to support Ansible as a kernel.
+    (only changes to nbconvert were needed for exporting playbooks)
 - Jupyter Notebook is already used in AWX development for debug/management of django.
 - Jupyter Notebook is architected in multiple repositories which allows for plugging
 in code to support ansible fairly easily.
 - BSD licensed projects can be re-licensed
 - Vendoring Jupyter source into Tower should be easy enough. Although upstream patches would have to be applied manually.
 - The Ansible kernel could be a part of core to reduce cost of maintaining the strict version requirements for future releases.
+
+
 
 
 
