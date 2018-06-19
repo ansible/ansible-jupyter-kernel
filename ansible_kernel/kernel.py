@@ -5,13 +5,13 @@ from subprocess import check_output
 
 import pkg_resources
 import atexit
-import time
 import os
 import re
 import yaml
 import threading
 from subprocess import Popen, STDOUT, PIPE
 import logging
+import json
 import traceback
 import tempfile
 from Queue import Queue
@@ -76,12 +76,12 @@ class AnsibleKernelHelpersThread(object):
     def recv_status(self, msg):
         logger = logging.getLogger('ansible_kernel.kernel.recv_status')
         logger.info(msg)
-        self.queue.put(StatusMessage(msg))
+        self.queue.put(StatusMessage(json.loads(msg[0])))
 
     def recv_pause(self, msg):
         logger = logging.getLogger('ansible_kernel.kernel.recv_pause')
         logger.info("completed %s waiting...", msg)
-        self.queue.put(TaskCompletionMessage(msg))
+        self.queue.put(TaskCompletionMessage(json.loads(msg[0])))
 
     def _thread_main(self):
         """The inner loop that's actually run in a thread"""
@@ -140,14 +140,47 @@ class AnsibleKernel(Kernel):
         self.helper = AnsibleKernelHelpersThread(self.queue)
         self.helper.start()
 
-    def process_output(self, output):
-        logger = logging.getLogger('ansible_kernel.kernel.process_output')
+    def process_message(self, message):
+        logger = logging.getLogger('ansible_kernel.kernel.process_message')
+        logger.info("message %s", message)
+
+        message_type = message[0]
+        message_data = message[1]
+
+        logger.info("message_type %s", message_type)
+        logger.info("message_data %s", message_data)
+
+        if message_data.get('task_name', '') == 'pause_for_kernel':
+            return
+        if message_data.get('task_name', '') == 'include_tasks':
+            return
+
+        output = ''
+
+        if message_type == 'TaskStart':
+            output = 'TASK [%s] %s\n' % (message_data['task_name'], '*' * (72 - len(message_data['task_name'])))
+
+        elif message_type == 'DeviceStatus':
+            pass
+        elif message_type == 'TaskStatus':
+            if message_data.get('changed', False):
+                output = 'changed: [%s]' % message_data['device_name']
+            else:
+                output = 'ok: [%s]' % message_data['device_name']
+
+            if message_data.get('results', None):
+                output += " => "
+                output += message_data['results']
+            output += "\n"
+        else:
+            output = str(message)
+
         logger.info("output %s", output)
 
         if not self.silent:
 
             # Send standard output
-            stream_content = {'name': 'stdout', 'text': output}
+            stream_content = {'name': 'stdout', 'text': str(output)}
             self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def do_execute(self, code, silent, store_history=True,
@@ -229,7 +262,7 @@ class AnsibleKernel(Kernel):
         with open(os.path.join(self.temp_dir, 'playbook.yml'), 'w') as f:
             f.write(yaml.safe_dump(playbook, default_flow_style=False))
 
-        command = ['ansible-playbook', 'playbook.yml']
+        command = ['ansible-playbook', 'playbook.yml', '-vvvv']
 
         logger.info("command %s", command)
 
@@ -240,7 +273,7 @@ class AnsibleKernel(Kernel):
             msg = self.queue.get()
             logger.info(msg)
             if isinstance(msg, StatusMessage):
-                self.process_output(str(msg.message))
+                self.process_message(msg.message)
             elif isinstance(msg, TaskCompletionMessage):
                 break
 
@@ -294,6 +327,17 @@ class AnsibleKernel(Kernel):
 
             with open(os.path.join(self.temp_dir, 'next_task{0}.yml'.format(self.tasks_counter - 2)), 'w') as f:
                 f.write(yaml.safe_dump(tasks, default_flow_style=False))
+
+            self.helper.pause_socket.send('Proceed')
+
+            while True:
+                logger.info("getting message")
+                msg = self.queue.get()
+                logger.info(msg)
+                if isinstance(msg, StatusMessage):
+                    self.process_message(msg.message)
+                elif isinstance(msg, TaskCompletionMessage):
+                    break
 
         except KeyboardInterrupt:
             logger.error(traceback.format_exc())
