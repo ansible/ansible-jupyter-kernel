@@ -80,7 +80,7 @@ Tasks:
 - Add tab completion for ansible modules (done)
 - Add tab completion for ansible module arguments (done)
 - Add documentation integration (done)
-- Add export to task list for use with include_tasks (done)
+- Add export to playbook (done)
 - Rewrite a few of the Ansible for Networks tutorials with this
 
 
