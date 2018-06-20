@@ -172,7 +172,23 @@ in code to support ansible fairly easily.
 - Vendoring Jupyter source into Tower should be easy enough. Although upstream patches would have to be applied manually.
 - The Ansible kernel could be a part of core to reduce cost of maintaining the strict version requirements for future releases.
 
+Proposal Review
+---------------
+
+* This is hot
+* This is cool
+* Does this have a git workflow?  No.
+* How many ansible users would this use this feature?  About 50%.
+* It's probably more for new users than power users.
+* It might be useful for power users.
+* Integration with Ansible Runner would be useful for both projects.
+* Integration with Tower may come at a later date.
+* Release as an OS community project.
 
 
+Blog and Talk Ideas
+-------------------
 
+* Ansible Playbook builder using Jupyter and Ansible Kernel for the Ansible community
+* Setting up AWS with Ansible and Jupyter targeting the Jupyter community
 
