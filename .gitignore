@@ -1,1 +1,13 @@
-*.pyc
+# Mac OS X
+*.DS_Store
+
+# Editors
+*.sw[poj]
+*~
+
+/.tox
+/dist
+/build
+/*.egg-info
+*.py[c,o]
+.pytest_cache
