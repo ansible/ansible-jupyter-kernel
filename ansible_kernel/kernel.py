@@ -337,7 +337,10 @@ class AnsibleKernel(Kernel):
             with open(os.path.join(self.temp_dir, 'next_task{0}.yml'.format(self.tasks_counter - 2)), 'w') as f:
                 f.write(yaml.safe_dump(tasks, default_flow_style=False))
 
-            self.helper.pause_socket.send('Proceed')
+            try:
+                self.helper.pause_socket.send('Proceed')
+            except zmq.ZMQError:
+                logger.warning('Sent "Proceed" when no one was expecting it. This may hang.')
 
             while True:
                 logger.info("getting message")
