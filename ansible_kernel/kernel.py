@@ -48,9 +48,9 @@ class AnsibleKernelHelpersThread(object):
         self.io_loop = IOLoop(make_current=False)
         context = zmq.Context.instance()
         self.pause_socket = context.socket(zmq.REP)
-        self.pause_socket.bind("tcp://*:5555")
+        self.pause_socket_port = self.pause_socket.bind_to_random_port("tcp://127.0.0.1")
         self.status_socket = context.socket(zmq.PULL)
-        self.status_socket.bind("tcp://*:5556")
+        self.status_socket_port = self.status_socket.bind_to_random_port("tcp://127.0.0.1")
 
         self.pause_stream = ZMQStream(self.pause_socket, self.io_loop)
         self.status_stream = ZMQStream(self.status_socket, self.io_loop)
@@ -123,6 +123,9 @@ class AnsibleKernel(Kernel):
         Kernel.__init__(self, **kwargs)
         logger = logging.getLogger('ansible_kernel.kernel.__init__')
         self.temp_dir = tempfile.mkdtemp(prefix="ansible_kernel_playbook")
+        self.queue = Queue()
+        self.helper = AnsibleKernelHelpersThread(self.queue)
+        self.helper.start()
         with open(os.path.join(self.temp_dir, 'ansible.cfg'), 'w') as f:
             config = SafeConfigParser()
             config.add_section('defaults')
@@ -130,15 +133,14 @@ class AnsibleKernel(Kernel):
             config.set('defaults', 'callback_plugins', pkg_resources.resource_filename('ansible_kernel', 'plugins/callback'))
             config.set('defaults', 'roles_path', pkg_resources.resource_filename('ansible_kernel', 'roles'))
             config.set('defaults', 'inventory', 'inventory')
+            config.add_section('callback_ansible_kernel_helper')
+            config.set('callback_ansible_kernel_helper', 'status_port', str(self.helper.status_socket_port))
             config.write(f)
         self.current_play = yaml.dump(dict(hosts='all',
                                            gather_facts=False))
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
-        self.queue = Queue()
-        self.helper = AnsibleKernelHelpersThread(self.queue)
-        self.helper.start()
 
     def process_message(self, message):
         logger = logging.getLogger('ansible_kernel.kernel.process_message')
@@ -253,7 +255,9 @@ class AnsibleKernel(Kernel):
         current_play['roles'] = current_play.get('roles', [])
         current_play['roles'].insert(0, 'ansible_kernel_helpers')
 
-        tasks.append({'pause_for_kernel': {'host': '127.0.0.1', 'port': 5555, 'task_num': self.tasks_counter}})
+        tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
+                                           'port': self.helper.pause_socket_port,
+                                           'task_num': self.tasks_counter}})
         tasks.append({'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
         self.tasks_counter += 1
 
@@ -266,7 +270,10 @@ class AnsibleKernel(Kernel):
 
         logger.info("command %s", command)
 
-        self.ansible_process = Popen(command, cwd=self.temp_dir)
+        env = os.environ.copy()
+        env['ANSIBLE_KERNEL_STATUS_PORT'] = str(self.helper.status_socket_port)
+
+        self.ansible_process = Popen(command, cwd=self.temp_dir, env=env)
 
         while True:
             logger.info("getting message")
@@ -319,7 +326,9 @@ class AnsibleKernel(Kernel):
             tasks = []
 
             tasks.append(yaml.load(self.current_task))
-            tasks.append({'pause_for_kernel': {'host': '127.0.0.1', 'port': 5555, 'task_num': self.tasks_counter}})
+            tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
+                                               'port': self.helper.pause_socket_port,
+                                               'task_num': self.tasks_counter}})
             tasks.append({'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
             self.tasks_counter += 1
 

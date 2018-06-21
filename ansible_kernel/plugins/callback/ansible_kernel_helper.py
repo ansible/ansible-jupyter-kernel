@@ -5,6 +5,7 @@ from ansible.plugins.callback import CallbackBase
 from ansible.playbook.task_include import TaskInclude
 import json
 import zmq
+import os
 
 
 from functools import wraps
@@ -38,7 +39,8 @@ class CallbackModule(CallbackBase):
         super(CallbackModule, self).__init__()
         self.zmq_context = zmq.Context()
         self.socket = self.zmq_context.socket(zmq.PUSH)
-        self.socket.connect("tcp://localhost:5556")
+        self.status_port = os.getenv('ANSIBLE_KERNEL_STATUS_PORT')
+        self.socket.connect("tcp://127.0.0.1:{0}".format(self.status_port))
         self.task = None
         self.play = None
         self.hosts = []
@@ -135,25 +137,3 @@ class CallbackModule(CallbackBase):
     @debug
     def v2_playbook_on_no_hosts_remaining(self):
         pass
-
-    def _handle_warnings(self, res):
-        ''' display warnings, if enabled and any exist in the result '''
-        warnings = []
-        deprecations = []
-        if 'warnings' in res and res['warnings']:
-            for warning in res['warnings']:
-                warnings.append(warning)
-            del res['warnings']
-        if 'deprecations' in res and res['deprecations']:
-            for warning in res['deprecations']:
-                deprecations.append(warning)
-            del res['deprecations']
-        return warnings, deprecations
-
-    def _handle_exception(self, result):
-
-        exception = None
-        if 'exception' in result:
-            exception = "The full traceback is:\n" + result['exception']
-            del result['exception']
-        return exception
