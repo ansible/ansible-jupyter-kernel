@@ -59,6 +59,9 @@ Jupyter Notebook Technical Details
   +  See: https://github.com/ipython/ipykernel/blob/master/ipykernel/kernelbase.py
 
 
+Road Map
+========
+
 
 Initial Project Evaluation
 ---------------------------
@@ -93,19 +96,23 @@ for use the Juypter notebooks and add to AWX.
 
 Tasks:
 
+- Legal license approval (done)
+- Release manager approval
+- Add to public repo under ansible
+- Add all the standard python packaging files
 - Push module to PYPI
 - Add awx integration
 - Test by converting tutorials to notebooks
 - Write blog post
-- Write AnsibleFest talk
+- Write AnsibleFest talk (submitted talk)
 - Demo recordings
 
 
-Release 1 Product (Proposed for 3.4)
+Release 1 Product
 ------------------------------------
 * Time: 3 months work
 * 4 resources: 1 python, 1 javascript, 1 designer, 1 tester
-* Result: A product useful for building ansible task files for used in include_tasks
+* Result: A product useful for building ansible playbooks
 
 Tasks:
 
@@ -119,7 +126,7 @@ Tasks:
 Result:  A web based UI that can build simple playbooks consisting of tasks
 
 
-Release 2 Product (Proposed for 3.5)
+Release 2 Product
 ------------------------------------
 * Time: 3 months work
 * 5 resources: 1 python, 2 javascript, 1 designer, 1 tester
@@ -129,7 +136,7 @@ Tasks:
 
 - Complete conversion of Jupyter Notebook to Ansible Playook builder
 
-Release 3 Product (Proposed for 3.6)
+Release 3 Product
 ------------------------------------
 * Time: 3 months work
 * 4 resources: 1 python, 1 javascript, 1 designer, 1 tester
@@ -140,7 +147,7 @@ Tasks:
 - Add features for building roles
 
 
-Release 4 Product (Proposed for 3.7)
+Release 4 Product
 ------------------------------------
 * Time: 3 months work
 * 5 resources: 1 python, 2 javascript, 1 designer, 1 tester

@@ -8,6 +8,7 @@ import atexit
 import os
 import re
 import yaml
+import time
 import threading
 from subprocess import Popen, STDOUT, PIPE
 import logging
@@ -531,3 +532,25 @@ class AnsibleKernel(Kernel):
         data['text/plain'] = output
 
         return data
+
+    def is_ansible_alive(self):
+        try:
+            os.kill(self.ansible_process.pid, 0)
+            return True
+        except Exception:
+            return False
+
+    def do_shutdown(self, restart):
+
+        if self.ansible_process is not None:
+            self.ansible_process.terminate()
+
+        for _ in xrange(10):
+            time.sleep(1)
+            if self.is_ansible_alive():
+                break
+
+        if self.is_ansible_alive():
+            self.ansible_process.kill()
+
+        return {'status': 'ok', 'restart': restart}
