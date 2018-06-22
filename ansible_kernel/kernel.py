@@ -8,13 +8,13 @@ import atexit
 import os
 import re
 import yaml
-import time
 import threading
 from subprocess import Popen, STDOUT, PIPE
 import logging
 import json
 import traceback
 import tempfile
+import psutil
 from Queue import Queue
 from collections import namedtuple
 
@@ -123,8 +123,19 @@ class AnsibleKernel(Kernel):
     def __init__(self, **kwargs):
         Kernel.__init__(self, **kwargs)
         logger = logging.getLogger('ansible_kernel.kernel.__init__')
+        self.ansible_process = None
+        self.current_play = None
+        self.default_play = yaml.dump(dict(hosts='localhost',
+                                           name='default',
+                                           gather_facts=False))
         self.temp_dir = tempfile.mkdtemp(prefix="ansible_kernel_playbook")
         self.queue = Queue()
+        self.tasks_counter = 0
+        self.current_task = None
+        logger.debug(self.temp_dir)
+        self.do_execute_play(self.default_play)
+
+    def start_helper(self):
         self.helper = AnsibleKernelHelpersThread(self.queue)
         self.helper.start()
         with open(os.path.join(self.temp_dir, 'ansible.cfg'), 'w') as f:
@@ -137,11 +148,6 @@ class AnsibleKernel(Kernel):
             config.add_section('callback_ansible_kernel_helper')
             config.set('callback_ansible_kernel_helper', 'status_port', str(self.helper.status_socket_port))
             config.write(f)
-        self.current_play = yaml.dump(dict(hosts='all',
-                                           gather_facts=False))
-        self.tasks_counter = 0
-        self.current_task = None
-        logger.debug(self.temp_dir)
 
     def process_message(self, message):
         logger = logging.getLogger('ansible_kernel.kernel.process_message')
@@ -243,6 +249,9 @@ class AnsibleKernel(Kernel):
 
     def do_execute_play(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_execute_play')
+        if self.is_ansible_alive():
+            self.do_shutdown(False)
+        self.start_helper()
         code_data = yaml.load(code)
         logger.debug('code_data %r %s', code_data)
         logger.debug('code_data type: %s', type(code_data))
@@ -338,10 +347,7 @@ class AnsibleKernel(Kernel):
             with open(os.path.join(self.temp_dir, 'next_task{0}.yml'.format(self.tasks_counter - 2)), 'w') as f:
                 f.write(yaml.safe_dump(tasks, default_flow_style=False))
 
-            try:
-                self.helper.pause_socket.send('Proceed')
-            except zmq.ZMQError:
-                logger.warning('Sent "Proceed" when no one was expecting it. This may hang.')
+            self.helper.pause_socket.send('Proceed')
 
             while True:
                 logger.info("getting message")
@@ -534,6 +540,8 @@ class AnsibleKernel(Kernel):
         return data
 
     def is_ansible_alive(self):
+        if self.ansible_process is None:
+            return False
         try:
             os.kill(self.ansible_process.pid, 0)
             return True
@@ -542,15 +550,23 @@ class AnsibleKernel(Kernel):
 
     def do_shutdown(self, restart):
 
-        if self.ansible_process is not None:
-            self.ansible_process.terminate()
+        logger = logging.getLogger('ansible_kernel.kernel.do_shutdown')
 
-        for _ in xrange(10):
-            time.sleep(1)
-            if self.is_ansible_alive():
-                break
+        current_process = psutil.Process(self.ansible_process.pid)
+        children = current_process.children(recursive=True)
+        for child in children:
+            print('Child pid is {}'.format(child.pid))
 
         if self.is_ansible_alive():
+            logger.info('killing ansible {0}'.format(self.ansible_process.pid))
             self.ansible_process.kill()
+            for child in children:
+                logger.info('killing ansible sub {0}'.format(child.pid))
+                child.kill()
 
+        logger.info('stopping helper')
+        self.helper.stop()
+
+        logger.info('clean up')
+        self.ansible_process = None
         return {'status': 'ok', 'restart': restart}

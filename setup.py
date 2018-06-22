@@ -6,6 +6,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         'PyYAML',
+        'psutil',
     ],
     zip_safe=False
 )
