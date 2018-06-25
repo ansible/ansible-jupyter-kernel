@@ -6,6 +6,7 @@ from subprocess import check_output
 import pkg_resources
 import atexit
 import os
+import io
 import re
 import yaml
 import threading
@@ -123,6 +124,7 @@ class AnsibleKernel(Kernel):
     def __init__(self, **kwargs):
         Kernel.__init__(self, **kwargs)
         logger = logging.getLogger('ansible_kernel.kernel.__init__')
+        self.ansible_cfg = None
         self.ansible_process = None
         self.current_play = None
         self.default_play = yaml.dump(dict(hosts='localhost',
@@ -138,16 +140,18 @@ class AnsibleKernel(Kernel):
     def start_helper(self):
         self.helper = AnsibleKernelHelpersThread(self.queue)
         self.helper.start()
+        config = SafeConfigParser()
+        if self.ansible_cfg is not None:
+            config.readfp(io.BytesIO(self.ansible_cfg))
         with open(os.path.join(self.temp_dir, 'ansible.cfg'), 'w') as f:
-            config = SafeConfigParser()
-            config.add_section('defaults')
+            if not config.has_section('defaults'):
+                config.add_section('defaults')
             config.set('defaults', 'callback_whitelist', 'ansible_kernel_helper')
-            config.set('defaults', 'host_key_checking', 'False')
-            config.set('defaults', 'vault_password_file', '~/.rhv/vault-secret')
             config.set('defaults', 'callback_plugins', os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
             config.set('defaults', 'roles_path', os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'roles')))
             config.set('defaults', 'inventory', 'inventory')
-            config.add_section('callback_ansible_kernel_helper')
+            if not config.has_section('callback_ansible_kernel_helper'):
+                config.add_section('callback_ansible_kernel_helper')
             config.set('callback_ansible_kernel_helper', 'status_port', str(self.helper.status_socket_port))
             config.write(f)
 
@@ -210,6 +214,8 @@ class AnsibleKernel(Kernel):
 
         if code.strip().startswith("#inventory"):
             return self.do_inventory(code)
+        elif code.strip().startswith("#ansible.cfg"):
+            return self.do_ansible_cfg(code)
         elif code.strip().startswith("#host_vars"):
             return self.do_host_vars(code)
         elif code.strip().startswith("#group_vars"):
@@ -228,6 +234,17 @@ class AnsibleKernel(Kernel):
             f.write(code)
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
+
+    def do_ansible_cfg(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_ansible_cfg')
+        code_lines = code.strip().splitlines(True)
+        self.ansible_cfg = str(code)
+        config = SafeConfigParser()
+        if self.ansible_cfg is not None:
+            config.readfp(io.BytesIO(self.ansible_cfg))
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
+
 
     def do_host_vars(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_host_vars')
@@ -382,6 +399,8 @@ class AnsibleKernel(Kernel):
                    'status': 'ok'}
 
         if code.strip().startswith("#inventory"):
+            return default
+        elif code.strip().startswith("#ansible.cfg"):
             return default
         elif code.strip().startswith("#host_vars"):
             return default
