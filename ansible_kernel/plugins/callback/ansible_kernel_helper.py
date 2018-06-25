@@ -69,6 +69,9 @@ class CallbackModule(CallbackBase):
                                                         device_name=result._host.get_name(),
                                                         delegated_host_name=str(delegated_vars.get('ansible_host', '')),
                                                         changed=result._result.get('changed', False),
+                                                        failed=False,
+                                                        unreachable=False,
+                                                        skipped=False,
                                                         results=self._dump_results(result._result) if '_ansible_verbose_always' in result._result else None,
                                                         task_id=str(result._task._uuid))]))
 
@@ -78,6 +81,10 @@ class CallbackModule(CallbackBase):
         self._clean_results(result._result, result._task.action)
         self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
                                                         device_name=result._host.get_name(),
+                                                        changed=False,
+                                                        failed=True,
+                                                        unreachable=False,
+                                                        skipped=False,
                                                         delegated_host_name=str(delegated_vars.get('ansible_host', '')),
                                                         results=self._dump_results(result._result) if '_ansible_verbose_always' in result._result else None,
                                                         task_id=str(result._task._uuid))]))
@@ -86,12 +93,19 @@ class CallbackModule(CallbackBase):
     def runner_on_unreachable(self, host, result, ignore_errors=False):
         self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
                                                         device_name=host,
+                                                        changed=False,
+                                                        failed=False,
+                                                        unreachable=True,
+                                                        skipped=False,
                                                         task_id=str(self.task._uuid))]))
 
     @debug
     def v2_runner_item_on_skipped(self, result, ignore_errors=False):
         self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
-                                                        device_name=result._host.get_name(),
+                                                        changed=False,
+                                                        failed=False,
+                                                        unreachable=False,
+                                                        skipped=True,
                                                         task_id=str(result._task._uuid))]))
 
     @debug

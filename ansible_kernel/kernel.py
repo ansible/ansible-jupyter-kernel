@@ -142,6 +142,7 @@ class AnsibleKernel(Kernel):
             config = SafeConfigParser()
             config.add_section('defaults')
             config.set('defaults', 'callback_whitelist', 'ansible_kernel_helper')
+            config.set('defaults', 'host_key_checking', 'False')
             config.set('defaults', 'callback_plugins', os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
             config.set('defaults', 'roles_path', os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'roles')))
             config.set('defaults', 'inventory', 'inventory')
@@ -174,6 +175,10 @@ class AnsibleKernel(Kernel):
         elif message_type == 'TaskStatus':
             if message_data.get('changed', False):
                 output = 'changed: [%s]' % message_data['device_name']
+            elif message_data.get('unreachable', False):
+                output = 'fatal: [%s]: UNREACHABLE!' % message_data['device_name']
+            elif message_data.get('failed', False):
+                output = 'fatal: [%s]: FAILED!' % message_data['device_name']
             else:
                 output = 'ok: [%s]' % message_data['device_name']
 
