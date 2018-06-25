@@ -143,6 +143,7 @@ class AnsibleKernel(Kernel):
             config.add_section('defaults')
             config.set('defaults', 'callback_whitelist', 'ansible_kernel_helper')
             config.set('defaults', 'host_key_checking', 'False')
+            config.set('defaults', 'vault_password_file', '~/.rhv/vault-secret')
             config.set('defaults', 'callback_plugins', os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
             config.set('defaults', 'roles_path', os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'roles')))
             config.set('defaults', 'inventory', 'inventory')
@@ -230,25 +231,27 @@ class AnsibleKernel(Kernel):
 
     def do_host_vars(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_host_vars')
-        host = code.strip().splitlines()[0][len('#host_vars'):].strip()
+        code_lines = code.strip().splitlines(True)
+        host = code_lines[0][len('#host_vars'):].strip()
         logger.debug("host %s", host)
         host_vars = os.path.join(self.temp_dir, 'host_vars')
         if not os.path.exists(host_vars):
             os.mkdir(host_vars)
         with open(os.path.join(host_vars, host), 'w') as f:
-            f.write(code)
+            f.write("".join(code_lines[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
     def do_group_vars(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_group_vars')
-        group = code.strip().splitlines()[0][len('#group_vars'):].strip()
+        code_lines = code.strip().splitlines(True)
+        group = code_lines[0][len('#group_vars'):].strip()
         logger.debug("group %s", group)
         group_vars = os.path.join(self.temp_dir, 'group_vars')
         if not os.path.exists(group_vars):
             os.mkdir(group_vars)
         with open(os.path.join(group_vars, group), 'w') as f:
-            f.write(code)
+            f.write("".join(code_lines[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
