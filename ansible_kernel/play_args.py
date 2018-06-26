@@ -5,4 +5,3 @@ play_args = [
     'become_method',
     'gather_facts'
 ]
-
