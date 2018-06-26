@@ -11,3 +11,7 @@
 /*.egg-info
 *.py[c,o]
 .pytest_cache
+
+# Ansible Jupyter Kernel
+/notebooks/.ipynb_checkpoints/
+ansible_kernel.log
