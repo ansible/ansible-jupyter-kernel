@@ -72,7 +72,7 @@ class CallbackModule(CallbackBase):
                                                         failed=False,
                                                         unreachable=False,
                                                         skipped=False,
-                                                        results=self._dump_results(result._result) if '_ansible_verbose_always' in result._result else None,
+                                                        results=self._dump_results(result._result),
                                                         task_id=str(result._task._uuid))]))
 
     @debug
@@ -86,7 +86,7 @@ class CallbackModule(CallbackBase):
                                                         unreachable=False,
                                                         skipped=False,
                                                         delegated_host_name=str(delegated_vars.get('ansible_host', '')),
-                                                        results=self._dump_results(result._result) if '_ansible_verbose_always' in result._result else None,
+                                                        results=self._dump_results(result._result),
                                                         task_id=str(result._task._uuid))]))
 
     @debug
@@ -147,6 +147,7 @@ class CallbackModule(CallbackBase):
             status = "fail" if s['failures'] > 0 else status
             status = "fail" if s['unreachable'] > 0 else status
             self.socket.send(json.dumps(['DeviceStatus', dict(name=host.get_name())]))
+        self.socket.send(json.dumps(['PlaybookEnded', dict()]))
 
     @debug
     def v2_playbook_on_no_hosts_remaining(self):

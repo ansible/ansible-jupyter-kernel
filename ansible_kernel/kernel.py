@@ -185,6 +185,8 @@ class AnsibleKernel(Kernel):
 
         elif message_type == 'DeviceStatus':
             pass
+        elif message_type == 'PlaybookEnded':
+            pass
         elif message_type == 'TaskStatus':
             if message_data.get('changed', False):
                 output = 'changed: [%s]' % message_data['device_name']
@@ -253,7 +255,7 @@ class AnsibleKernel(Kernel):
         config = SafeConfigParser()
         if self.ansible_cfg is not None:
             config.readfp(io.BytesIO(self.ansible_cfg))
-        logger.debug("ansible_cfg %s", code)
+        logger.info("ansible.cfg set to %s", code)
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
@@ -392,7 +394,9 @@ class AnsibleKernel(Kernel):
 
             tasks = []
 
-            tasks.append(yaml.load(self.current_task))
+            current_task_data = yaml.load(self.current_task)
+            current_task_data['ignore_errors'] = True
+            tasks.append(current_task_data)
             tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                                'port': self.helper.pause_socket_port,
                                                'task_num': self.tasks_counter}})
