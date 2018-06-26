@@ -50,9 +50,11 @@ class AnsibleKernelHelpersThread(object):
         self.io_loop = IOLoop(make_current=False)
         context = zmq.Context.instance()
         self.pause_socket = context.socket(zmq.REP)
-        self.pause_socket_port = self.pause_socket.bind_to_random_port("tcp://127.0.0.1")
+        self.pause_socket_port = self.pause_socket.bind_to_random_port(
+            "tcp://127.0.0.1")
         self.status_socket = context.socket(zmq.PULL)
-        self.status_socket_port = self.status_socket.bind_to_random_port("tcp://127.0.0.1")
+        self.status_socket_port = self.status_socket.bind_to_random_port(
+            "tcp://127.0.0.1")
 
         self.pause_stream = ZMQStream(self.pause_socket, self.io_loop)
         self.status_stream = ZMQStream(self.status_socket, self.io_loop)
@@ -106,7 +108,8 @@ class AnsibleKernel(Kernel):
     @property
     def banner(self):
         if self._banner is None:
-            self._banner = check_output(['ansible', '--version']).decode('utf-8')
+            self._banner = check_output(
+                ['ansible', '--version']).decode('utf-8')
         return self._banner
 
     language_info = {'name': 'ansible',
@@ -146,13 +149,17 @@ class AnsibleKernel(Kernel):
         with open(os.path.join(self.temp_dir, 'ansible.cfg'), 'w') as f:
             if not config.has_section('defaults'):
                 config.add_section('defaults')
-            config.set('defaults', 'callback_whitelist', 'ansible_kernel_helper')
-            config.set('defaults', 'callback_plugins', os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
-            config.set('defaults', 'roles_path', os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'roles')))
+            config.set('defaults', 'callback_whitelist',
+                       'ansible_kernel_helper')
+            config.set('defaults', 'callback_plugins', os.path.abspath(
+                pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
+            config.set('defaults', 'roles_path', os.path.abspath(
+                pkg_resources.resource_filename('ansible_kernel', 'roles')))
             config.set('defaults', 'inventory', 'inventory')
             if not config.has_section('callback_ansible_kernel_helper'):
                 config.add_section('callback_ansible_kernel_helper')
-            config.set('callback_ansible_kernel_helper', 'status_port', str(self.helper.status_socket_port))
+            config.set('callback_ansible_kernel_helper',
+                       'status_port', str(self.helper.status_socket_port))
             config.write(f)
 
     def process_message(self, message):
@@ -173,7 +180,8 @@ class AnsibleKernel(Kernel):
         output = ''
 
         if message_type == 'TaskStart':
-            output = 'TASK [%s] %s\n' % (message_data['task_name'], '*' * (72 - len(message_data['task_name'])))
+            output = 'TASK [%s] %s\n' % (
+                message_data['task_name'], '*' * (72 - len(message_data['task_name'])))
 
         elif message_type == 'DeviceStatus':
             pass
@@ -241,14 +249,13 @@ class AnsibleKernel(Kernel):
 
     def do_ansible_cfg(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_ansible_cfg')
-        code_lines = code.strip().splitlines(True)
         self.ansible_cfg = str(code)
         config = SafeConfigParser()
         if self.ansible_cfg is not None:
             config.readfp(io.BytesIO(self.ansible_cfg))
+        logger.debug("ansible_cfg %s", code)
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
-
 
     def do_host_vars(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_host_vars')
@@ -317,7 +324,8 @@ class AnsibleKernel(Kernel):
         tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                            'port': self.helper.pause_socket_port,
                                            'task_num': self.tasks_counter}})
-        tasks.append({'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
+        tasks.append(
+            {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
         self.tasks_counter += 1
 
         logger.debug(yaml.safe_dump(playbook, default_flow_style=False))
@@ -388,7 +396,8 @@ class AnsibleKernel(Kernel):
             tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                                'port': self.helper.pause_socket_port,
                                                'task_num': self.tasks_counter}})
-            tasks.append({'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
+            tasks.append(
+                {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
             self.tasks_counter += 1
 
             logger.debug(yaml.safe_dump(tasks, default_flow_style=False))
@@ -579,8 +588,10 @@ class AnsibleKernel(Kernel):
 
         data = {}
 
-        logger.debug("command %s", " ".join(['ansible-doc', '-t', 'module', module]))
-        p = Popen(['ansible-doc', '-t', 'module', module], stdout=PIPE, stderr=STDOUT)
+        logger.debug("command %s", " ".join(
+            ['ansible-doc', '-t', 'module', module]))
+        p = Popen(['ansible-doc', '-t', 'module', module],
+                  stdout=PIPE, stderr=STDOUT)
         p.wait()
         exitcode = p.returncode
         logger.debug('exitcode %s', exitcode)
