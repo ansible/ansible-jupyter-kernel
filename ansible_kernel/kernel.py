@@ -361,7 +361,7 @@ class AnsibleKernel(Kernel):
             code_data = yaml.load(code)
         except Exception:
             code_data = code
-        logger.debug('code_data %r %s', code_data)
+        logger.debug('code_data %s', code_data)
         logger.debug('code_data type: %s', type(code_data))
 
         if isinstance(code_data, basestring):
