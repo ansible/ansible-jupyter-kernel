@@ -220,6 +220,8 @@ class AnsibleKernel(Kernel):
             return self.do_host_vars(code)
         elif code.strip().startswith("#group_vars"):
             return self.do_group_vars(code)
+        elif code.strip().startswith("#vars"):
+            return self.do_vars(code)
         elif code.strip().startswith("#task"):
             return self.do_execute_task(code)
         elif code.strip().startswith("#play"):
@@ -255,6 +257,16 @@ class AnsibleKernel(Kernel):
         if not os.path.exists(host_vars):
             os.mkdir(host_vars)
         with open(os.path.join(host_vars, host), 'w') as f:
+            f.write("".join(code_lines[1:]))
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
+
+    def do_vars(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_vars')
+        code_lines = code.strip().splitlines(True)
+        vars = code_lines[0][len('#vars'):].strip()
+        logger.debug("vars %s", vars)
+        with open(os.path.join(self.temp_dir, vars), 'w') as f:
             f.write("".join(code_lines[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
