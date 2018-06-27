@@ -13,5 +13,5 @@
 .pytest_cache
 
 # Ansible Jupyter Kernel
-/notebooks/.ipynb_checkpoints/
+.ipynb_checkpoints
 ansible_kernel.log
