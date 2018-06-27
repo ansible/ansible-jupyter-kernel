@@ -16,7 +16,7 @@ import json
 import traceback
 import tempfile
 import psutil
-from Queue import Queue
+from Queue import Queue, Empty
 from collections import namedtuple
 
 import zmq
@@ -349,6 +349,8 @@ class AnsibleKernel(Kernel):
         playbook = []
 
         current_play = yaml.load(self.current_play)
+        if current_play is None:
+            current_play = {}
         playbook.append(current_play)
         tasks = current_play['tasks'] = current_play.get('tasks', [])
         current_play['roles'] = current_play.get('roles', [])
@@ -356,7 +358,7 @@ class AnsibleKernel(Kernel):
 
         tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                            'port': self.helper.pause_socket_port,
-                                           'task_num': self.tasks_counter-1}})
+                                           'task_num': self.tasks_counter - 1}})
         tasks.append(
             {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
 
@@ -384,7 +386,15 @@ class AnsibleKernel(Kernel):
 
         while True:
             logger.info("getting message %s", self.helper.pause_socket_port)
-            msg = self.queue.get()
+            try:
+                if not self.is_ansible_alive():
+                    logger.info("ansible is dead")
+                    self.do_shutdown(False)
+                    return
+                msg = self.queue.get(timeout=1)
+            except Empty:
+                logger.info("Empty!")
+                continue
             logger.info(msg)
             if isinstance(msg, StatusMessage):
                 if self.process_message(msg.message):
@@ -439,7 +449,7 @@ class AnsibleKernel(Kernel):
                                                'port': self.helper.pause_socket_port,
                                                'task_num': self.tasks_counter}})
             tasks.append(
-                {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter+1)})
+                {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter + 1)})
 
             logger.debug(yaml.safe_dump(tasks, default_flow_style=False))
 
@@ -652,11 +662,7 @@ class AnsibleKernel(Kernel):
     def is_ansible_alive(self):
         if self.ansible_process is None:
             return False
-        try:
-            os.kill(self.ansible_process.pid, 0)
-            return True
-        except Exception:
-            return False
+        return self.ansible_process.poll() is None
 
     def do_shutdown(self, restart):
 
@@ -666,10 +672,13 @@ class AnsibleKernel(Kernel):
             logger.debug("No ansible process")
             return
 
-        current_process = psutil.Process(self.ansible_process.pid)
-        children = current_process.children(recursive=True)
-        for child in children:
-            print('Child pid is {}'.format(child.pid))
+        try:
+            current_process = psutil.Process(self.ansible_process.pid)
+            children = current_process.children(recursive=True)
+            for child in children:
+                print('Child pid is {}'.format(child.pid))
+        except psutil.NoSuchProcess:
+            pass
 
         if self.is_ansible_alive():
             logger.info('killing ansible {0}'.format(self.ansible_process.pid))
