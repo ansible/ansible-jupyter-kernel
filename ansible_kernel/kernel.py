@@ -16,7 +16,7 @@ import json
 import traceback
 import tempfile
 import psutil
-from Queue import Queue
+from Queue import Queue, Empty
 from collections import namedtuple
 
 import zmq
@@ -130,6 +130,9 @@ class AnsibleKernel(Kernel):
         self.ansible_cfg = None
         self.ansible_process = None
         self.current_play = None
+        self.next_task_file = None
+        self.task_files = []
+        self.playbook_file = None
         self.default_play = yaml.dump(dict(hosts='localhost',
                                            name='default',
                                            gather_facts=False))
@@ -141,8 +144,10 @@ class AnsibleKernel(Kernel):
         self.do_execute_play(self.default_play)
 
     def start_helper(self):
+        logger = logging.getLogger('ansible_kernel.kernel.start_helper')
         self.helper = AnsibleKernelHelpersThread(self.queue)
         self.helper.start()
+        logger.info("Started helper")
         config = SafeConfigParser()
         if self.ansible_cfg is not None:
             config.readfp(io.BytesIO(self.ansible_cfg))
@@ -161,10 +166,27 @@ class AnsibleKernel(Kernel):
             config.set('callback_ansible_kernel_helper',
                        'status_port', str(self.helper.status_socket_port))
             config.write(f)
+            logger.info("Wrote ansible.cfg")
+
+    def rewrite_ports(self):
+
+        with open(self.playbook_file, 'r') as f:
+            playbook = yaml.load(f.read())
+        playbook[0]['tasks'][0]['pause_for_kernel']['port'] = self.helper.pause_socket_port
+        with open(self.playbook_file, 'w') as f:
+            f.write(yaml.safe_dump(playbook, default_flow_style=False))
+
+    def clean_up_task_files(self):
+        for task_file in self.task_files:
+            if os.path.exists(task_file):
+                os.unlink(task_file)
+        self.task_files = []
 
     def process_message(self, message):
         logger = logging.getLogger('ansible_kernel.kernel.process_message')
         logger.info("message %s", message)
+
+        stop_processing = False
 
         message_type = message[0]
         message_data = message[1]
@@ -173,9 +195,9 @@ class AnsibleKernel(Kernel):
         logger.info("message_data %s", message_data)
 
         if message_data.get('task_name', '') == 'pause_for_kernel':
-            return
+            return stop_processing
         if message_data.get('task_name', '') == 'include_tasks':
-            return
+            return stop_processing
 
         output = ''
 
@@ -185,6 +207,14 @@ class AnsibleKernel(Kernel):
 
         elif message_type == 'DeviceStatus':
             pass
+        elif message_type == 'PlaybookEnded':
+            output = "\nPlaybook ended\nContext lost!\n"
+            self.do_shutdown(False)
+            self.clean_up_task_files()
+            self.start_helper()
+            self.rewrite_ports()
+            self.start_ansible_playbook()
+            stop_processing = True
         elif message_type == 'TaskStatus':
             if message_data.get('changed', False):
                 output = 'changed: [%s]' % message_data['device_name']
@@ -209,6 +239,9 @@ class AnsibleKernel(Kernel):
             # Send standard output
             stream_content = {'name': 'stdout', 'text': str(output)}
             self.send_response(self.iopub_socket, 'stream', stream_content)
+
+        logger.info("stop_processing %s", stop_processing)
+        return stop_processing
 
     def do_execute(self, code, silent, store_history=True,
                    user_expressions=None, allow_stdin=False):
@@ -253,7 +286,7 @@ class AnsibleKernel(Kernel):
         config = SafeConfigParser()
         if self.ansible_cfg is not None:
             config.readfp(io.BytesIO(self.ansible_cfg))
-        logger.debug("ansible_cfg %s", code)
+        logger.info("ansible.cfg set to %s", code)
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
@@ -316,6 +349,8 @@ class AnsibleKernel(Kernel):
         playbook = []
 
         current_play = yaml.load(self.current_play)
+        if current_play is None:
+            current_play = {}
         playbook.append(current_play)
         tasks = current_play['tasks'] = current_play.get('tasks', [])
         current_play['roles'] = current_play.get('roles', [])
@@ -323,15 +358,22 @@ class AnsibleKernel(Kernel):
 
         tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                            'port': self.helper.pause_socket_port,
-                                           'task_num': self.tasks_counter}})
+                                           'task_num': self.tasks_counter - 1}})
         tasks.append(
             {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
-        self.tasks_counter += 1
 
         logger.debug(yaml.safe_dump(playbook, default_flow_style=False))
 
-        with open(os.path.join(self.temp_dir, 'playbook.yml'), 'w') as f:
+        self.playbook_file = (os.path.join(self.temp_dir, 'playbook.yml'))
+        with open(self.playbook_file, 'w') as f:
             f.write(yaml.safe_dump(playbook, default_flow_style=False))
+
+        self.start_ansible_playbook()
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
+
+    def start_ansible_playbook(self):
+        logger = logging.getLogger('ansible_kernel.kernel.start_ansible_playbook')
 
         command = ['ansible-playbook', 'playbook.yml', '-vvvv']
 
@@ -343,16 +385,24 @@ class AnsibleKernel(Kernel):
         self.ansible_process = Popen(command, cwd=self.temp_dir, env=env)
 
         while True:
-            logger.info("getting message")
-            msg = self.queue.get()
+            logger.info("getting message %s", self.helper.pause_socket_port)
+            try:
+                if not self.is_ansible_alive():
+                    logger.info("ansible is dead")
+                    self.do_shutdown(False)
+                    return
+                msg = self.queue.get(timeout=1)
+            except Empty:
+                logger.info("Empty!")
+                continue
             logger.info(msg)
             if isinstance(msg, StatusMessage):
-                self.process_message(msg.message)
+                if self.process_message(msg.message):
+                    break
             elif isinstance(msg, TaskCompletionMessage):
+                logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
                 break
 
-        return {'status': 'ok', 'execution_count': self.execution_count,
-                'payload': [], 'user_expressions': {}}
 
     def do_execute_task(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
@@ -392,28 +442,36 @@ class AnsibleKernel(Kernel):
 
             tasks = []
 
-            tasks.append(yaml.load(self.current_task))
+            current_task_data = yaml.load(self.current_task)
+            current_task_data['ignore_errors'] = True
+            tasks.append(current_task_data)
             tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                                'port': self.helper.pause_socket_port,
                                                'task_num': self.tasks_counter}})
             tasks.append(
-                {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
-            self.tasks_counter += 1
+                {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter + 1)})
 
             logger.debug(yaml.safe_dump(tasks, default_flow_style=False))
 
-            with open(os.path.join(self.temp_dir, 'next_task{0}.yml'.format(self.tasks_counter - 2)), 'w') as f:
+            self.next_task_file = os.path.join(self.temp_dir,
+                                               'next_task{0}.yml'.format(self.tasks_counter))
+            self.tasks_counter += 1
+            self.task_files.append(self.next_task_file)
+            with open(self.next_task_file, 'w') as f:
                 f.write(yaml.safe_dump(tasks, default_flow_style=False))
+            logger.info('Wrote %s', self.next_task_file)
 
             self.helper.pause_socket.send('Proceed')
 
             while True:
-                logger.info("getting message")
+                logger.info("getting message %s", self.helper.pause_socket_port)
                 msg = self.queue.get()
                 logger.info(msg)
                 if isinstance(msg, StatusMessage):
-                    self.process_message(msg.message)
+                    if self.process_message(msg.message):
+                        break
                 elif isinstance(msg, TaskCompletionMessage):
+                    logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
                     break
 
         except KeyboardInterrupt:
@@ -604,20 +662,23 @@ class AnsibleKernel(Kernel):
     def is_ansible_alive(self):
         if self.ansible_process is None:
             return False
-        try:
-            os.kill(self.ansible_process.pid, 0)
-            return True
-        except Exception:
-            return False
+        return self.ansible_process.poll() is None
 
     def do_shutdown(self, restart):
 
         logger = logging.getLogger('ansible_kernel.kernel.do_shutdown')
 
-        current_process = psutil.Process(self.ansible_process.pid)
-        children = current_process.children(recursive=True)
-        for child in children:
-            print('Child pid is {}'.format(child.pid))
+        if self.ansible_process is None:
+            logger.debug("No ansible process")
+            return
+
+        try:
+            current_process = psutil.Process(self.ansible_process.pid)
+            children = current_process.children(recursive=True)
+            for child in children:
+                print('Child pid is {}'.format(child.pid))
+        except psutil.NoSuchProcess:
+            pass
 
         if self.is_ansible_alive():
             logger.info('killing ansible {0}'.format(self.ansible_process.pid))
@@ -628,6 +689,8 @@ class AnsibleKernel(Kernel):
 
         logger.info('stopping helper')
         self.helper.stop()
+        self.helper = None
+        self.tasks_counter = 0
 
         logger.info('clean up')
         self.ansible_process = None
