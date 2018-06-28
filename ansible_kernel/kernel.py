@@ -199,19 +199,32 @@ class AnsibleKernel(Kernel):
         logger.info("message_data %s", message_data)
 
         if message_data.get('task_name', '') == 'pause_for_kernel':
+            logger.debug('pause_for_kernel')
             return stop_processing
         if message_data.get('task_name', '') == 'include_tasks':
+            logger.debug('include_tasks')
+            if message_type == 'TaskStatus' and message_data.get('failed', False):
+                logger.debug('failed')
+                output = 'fatal: [%s]: FAILED!' % message_data['device_name']
+                if message_data.get('results', None):
+                    output += " => "
+                    output += message_data['results']
+                output += "\n"
+                stream_content = {'name': 'stdout', 'text': str(output)}
+                self.send_response(self.iopub_socket, 'stream', stream_content)
             return stop_processing
 
         output = ''
 
         if message_type == 'TaskStart':
+            logger.debug('TaskStart')
             output = 'TASK [%s] %s\n' % (
                 message_data['task_name'], '*' * (72 - len(message_data['task_name'])))
-
         elif message_type == 'DeviceStatus':
+            logger.debug('DeviceStatus')
             pass
         elif message_type == 'PlaybookEnded':
+            logger.debug('PlaybookEnded')
             output = "\nPlaybook ended\nContext lost!\n"
             self.do_shutdown(False)
             self.clean_up_task_files()
@@ -220,13 +233,18 @@ class AnsibleKernel(Kernel):
             self.start_ansible_playbook()
             stop_processing = True
         elif message_type == 'TaskStatus':
+            logger.debug('TaskStatus')
             if message_data.get('changed', False):
+                logger.debug('changed')
                 output = 'changed: [%s]' % message_data['device_name']
             elif message_data.get('unreachable', False):
+                logger.debug('unreachable')
                 output = 'fatal: [%s]: UNREACHABLE!' % message_data['device_name']
             elif message_data.get('failed', False):
+                logger.debug('failed')
                 output = 'fatal: [%s]: FAILED!' % message_data['device_name']
             else:
+                logger.debug('ok')
                 output = 'ok: [%s]' % message_data['device_name']
 
             if message_data.get('results', None):

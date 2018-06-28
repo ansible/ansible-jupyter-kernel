@@ -53,6 +53,8 @@ class CallbackModule(CallbackBase):
             del r['invocation']
         if 'changed' in r:
             del r['changed']
+        if 'reason' in r:
+            return r['reason']
         return super(CallbackModule, self)._dump_results(r)
 
 
