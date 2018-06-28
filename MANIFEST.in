@@ -1,0 +1,3 @@
+LICENSE.md
+include ansible_kernel/templates/*.tpl
+recursive-include ansible_kernel/roles *.py

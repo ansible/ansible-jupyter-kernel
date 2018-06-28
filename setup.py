@@ -33,10 +33,11 @@ with open('README.md', 'r') as f:
 
 setup(
     name='ansible-kernel',
-    version='0.1',
+    version='0.2',
     description='An Ansible kernel for Jupyter',
     long_description=long_description,
     packages=find_packages(),
+    package_data={'ansible_kernel': ['templates/ansible_playbook.tpl', 'templates/ansible_tasks.tpl']},
     cmdclass={'install': Installer},
     license='Apache',
     install_requires=[
