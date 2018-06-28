@@ -33,7 +33,7 @@ with open('README.md', 'r') as f:
 
 setup(
     name='ansible-kernel',
-    version='0.2',
+    version='0.3',
     description='An Ansible kernel for Jupyter',
     long_description=long_description,
     packages=find_packages(),

@@ -2,12 +2,17 @@
 
 ## Unreleased
 
+## [0.3] - 2018-06-28
+### Fixes
+- Fixed packaging
+
 ## [0.2] - 2018-06-28
 ### Added
 - Export notebook to Ansible playbook
 - Export notebook to Ansible tasks file
 - Error handling in play and task cells
 - Feedback for syntax errors in play and task cells
+
 
 ## [0.1] - 2018-06-27
 ### Added
