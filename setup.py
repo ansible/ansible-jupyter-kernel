@@ -44,5 +44,10 @@ setup(
         'psutil',
         'jupyter',
     ],
+    entry_points={
+        "nbconvert.exporters" : [
+            'ansible_tasks=ansible_kernel.exporters:AnsibleTasksExporter',
+            'ansible_playbook=ansible_kernel.exporters:AnsiblePlaybookExporter']
+    },
     zip_safe=False
 )
