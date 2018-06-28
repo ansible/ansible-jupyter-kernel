@@ -133,6 +133,8 @@ class AnsibleKernel(Kernel):
         self.next_task_file = None
         self.task_files = []
         self.playbook_file = None
+        self.silent = False
+        self.default_inventory = "[all]\nlocalhost\n"
         self.default_play = yaml.dump(dict(hosts='localhost',
                                            name='default',
                                            gather_facts=False))
@@ -141,6 +143,7 @@ class AnsibleKernel(Kernel):
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
+        self.do_inventory(self.default_inventory)
         self.do_execute_play(self.default_play)
 
     def start_helper(self):
@@ -154,6 +157,7 @@ class AnsibleKernel(Kernel):
         with open(os.path.join(self.temp_dir, 'ansible.cfg'), 'w') as f:
             if not config.has_section('defaults'):
                 config.add_section('defaults')
+            config.set('defaults', 'stdout_callback', 'null')
             config.set('defaults', 'callback_whitelist',
                        'ansible_kernel_helper')
             config.set('defaults', 'callback_plugins', os.path.abspath(
@@ -195,19 +199,32 @@ class AnsibleKernel(Kernel):
         logger.info("message_data %s", message_data)
 
         if message_data.get('task_name', '') == 'pause_for_kernel':
+            logger.debug('pause_for_kernel')
             return stop_processing
         if message_data.get('task_name', '') == 'include_tasks':
+            logger.debug('include_tasks')
+            if message_type == 'TaskStatus' and message_data.get('failed', False):
+                logger.debug('failed')
+                output = 'fatal: [%s]: FAILED!' % message_data['device_name']
+                if message_data.get('results', None):
+                    output += " => "
+                    output += message_data['results']
+                output += "\n"
+                stream_content = {'name': 'stdout', 'text': str(output)}
+                self.send_response(self.iopub_socket, 'stream', stream_content)
             return stop_processing
 
         output = ''
 
         if message_type == 'TaskStart':
+            logger.debug('TaskStart')
             output = 'TASK [%s] %s\n' % (
                 message_data['task_name'], '*' * (72 - len(message_data['task_name'])))
-
         elif message_type == 'DeviceStatus':
+            logger.debug('DeviceStatus')
             pass
         elif message_type == 'PlaybookEnded':
+            logger.debug('PlaybookEnded')
             output = "\nPlaybook ended\nContext lost!\n"
             self.do_shutdown(False)
             self.clean_up_task_files()
@@ -216,13 +233,18 @@ class AnsibleKernel(Kernel):
             self.start_ansible_playbook()
             stop_processing = True
         elif message_type == 'TaskStatus':
+            logger.debug('TaskStatus')
             if message_data.get('changed', False):
+                logger.debug('changed')
                 output = 'changed: [%s]' % message_data['device_name']
             elif message_data.get('unreachable', False):
+                logger.debug('unreachable')
                 output = 'fatal: [%s]: UNREACHABLE!' % message_data['device_name']
             elif message_data.get('failed', False):
+                logger.debug('failed')
                 output = 'fatal: [%s]: FAILED!' % message_data['device_name']
             else:
+                logger.debug('ok')
                 output = 'ok: [%s]' % message_data['device_name']
 
             if message_data.get('results', None):
@@ -375,20 +397,25 @@ class AnsibleKernel(Kernel):
     def start_ansible_playbook(self):
         logger = logging.getLogger('ansible_kernel.kernel.start_ansible_playbook')
 
-        command = ['ansible-playbook', 'playbook.yml', '-vvvv']
+        command = ['ansible-playbook', 'playbook.yml']
 
         logger.info("command %s", command)
 
         env = os.environ.copy()
         env['ANSIBLE_KERNEL_STATUS_PORT'] = str(self.helper.status_socket_port)
 
-        self.ansible_process = Popen(command, cwd=self.temp_dir, env=env)
+        self.ansible_process = Popen(command,
+                                     cwd=self.temp_dir,
+                                     env=env,
+                                     stdout=PIPE,
+                                     stderr=STDOUT)
 
         while True:
             logger.info("getting message %s", self.helper.pause_socket_port)
             try:
                 if not self.is_ansible_alive():
                     logger.info("ansible is dead")
+                    self.send_process_output()
                     self.do_shutdown(False)
                     return
                 msg = self.queue.get(timeout=1)
@@ -404,7 +431,19 @@ class AnsibleKernel(Kernel):
                 break
 
 
+    def send_process_output(self):
+        output = self.ansible_process.communicate()[0]
+        stream_content = {'name': 'stdout', 'text': str(output)}
+        self.send_response(self.iopub_socket, 'stream', stream_content)
+
     def do_execute_task(self, code):
+        if self.helper is None:
+            output = "No play found. Run a valid play cell"
+            stream_content = {'name': 'stdout', 'text': str(output)}
+            self.send_response(self.iopub_socket, 'stream', stream_content)
+            return {'status': 'ok', 'execution_count': self.execution_count,
+                    'payload': [], 'user_expressions': {}}
+
         logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
         self.current_task = code
         try:

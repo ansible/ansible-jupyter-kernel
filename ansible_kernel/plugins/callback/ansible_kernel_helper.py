@@ -45,6 +45,19 @@ class CallbackModule(CallbackBase):
         self.play = None
         self.hosts = []
 
+
+    def _dump_results(self, result):
+
+        r = result.copy()
+        if 'invocation' in r:
+            del r['invocation']
+        if 'changed' in r:
+            del r['changed']
+        if 'reason' in r:
+            return r['reason']
+        return super(CallbackModule, self)._dump_results(r)
+
+
     @debug
     def v2_playbook_on_setup(self):
         pass
