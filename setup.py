@@ -44,10 +44,12 @@ setup(
     cmdclass={'install': Installer},
     license='Apache',
     install_requires=[
+        'ansible',
         'PyYAML',
         'psutil',
         'jupyter',
         'tqdm',
+        'docopt',
     ],
     entry_points={
         "nbconvert.exporters" : [
