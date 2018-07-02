@@ -37,13 +37,17 @@ setup(
     description='An Ansible kernel for Jupyter',
     long_description=long_description,
     packages=find_packages(),
-    package_data={'ansible_kernel': ['templates/ansible_playbook.tpl', 'templates/ansible_tasks.tpl']},
+    package_data={'ansible_kernel': ['templates/ansible_playbook.tpl',
+                                     'templates/ansible_tasks.tpl',
+                                     'modules.yml',
+                                     'module_args.yml']},
     cmdclass={'install': Installer},
     license='Apache',
     install_requires=[
         'PyYAML',
         'psutil',
         'jupyter',
+        'tqdm',
     ],
     entry_points={
         "nbconvert.exporters" : [
