@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Module argument cache
+
 ## [0.3] - 2018-06-28
 ### Fixes
 - Fixed packaging
