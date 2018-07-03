@@ -162,8 +162,15 @@ class AnsibleKernel(Kernel):
                        'ansible_kernel_helper')
             config.set('defaults', 'callback_plugins', os.path.abspath(
                 pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
-            config.set('defaults', 'roles_path', os.path.abspath(
-                pkg_resources.resource_filename('ansible_kernel', 'roles')))
+            if config.has_option('defaults', 'roles_path'):
+                roles_path = config.get('defaults', 'roles_path')
+                roles_path = ":".join([os.path.abspath(x) for x in roles_path.split(":")])
+                roles_path = "{0}:{1}".format(roles_path,
+                                              os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'roles')))
+                config.set('defaults', 'roles_path', roles_path)
+            else:
+                config.set('defaults', 'roles_path', os.path.abspath(
+                    pkg_resources.resource_filename('ansible_kernel', 'roles')))
             config.set('defaults', 'inventory', 'inventory')
             if not config.has_section('callback_ansible_kernel_helper'):
                 config.add_section('callback_ansible_kernel_helper')
@@ -259,8 +266,11 @@ class AnsibleKernel(Kernel):
         if not self.silent:
 
             # Send standard output
+            logger.info("sending output")
             stream_content = {'name': 'stdout', 'text': str(output)}
             self.send_response(self.iopub_socket, 'stream', stream_content)
+        else:
+            logger.info("silent")
 
         logger.info("stop_processing %s", stop_processing)
         return stop_processing
@@ -391,6 +401,7 @@ class AnsibleKernel(Kernel):
             f.write(yaml.safe_dump(playbook, default_flow_style=False))
 
         self.start_ansible_playbook()
+        logger.info("done")
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
@@ -417,7 +428,7 @@ class AnsibleKernel(Kernel):
                     logger.info("ansible is dead")
                     self.send_process_output()
                     self.do_shutdown(False)
-                    return
+                    break
                 msg = self.queue.get(timeout=1)
             except Empty:
                 logger.info("Empty!")
@@ -430,13 +441,17 @@ class AnsibleKernel(Kernel):
                 logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
                 break
 
+        logger.info("done")
+
 
     def send_process_output(self):
         output = self.ansible_process.communicate()[0]
+        logger.debug("process output %s", output)
         stream_content = {'name': 'stdout', 'text': str(output)}
         self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def do_execute_task(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
         if self.helper is None:
             output = "No play found. Run a valid play cell"
             stream_content = {'name': 'stdout', 'text': str(output)}
@@ -444,7 +459,6 @@ class AnsibleKernel(Kernel):
             return {'status': 'ok', 'execution_count': self.execution_count,
                     'payload': [], 'user_expressions': {}}
 
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
         self.current_task = code
         try:
             code_data = yaml.load(code)
