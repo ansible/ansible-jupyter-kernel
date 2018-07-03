@@ -143,6 +143,7 @@ class AnsibleKernel(Kernel):
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
+        os.mkdir(os.path.join(self.temp_dir, 'roles'))
         self.do_inventory(self.default_inventory)
         self.do_execute_play(self.default_play)
 
@@ -162,8 +163,15 @@ class AnsibleKernel(Kernel):
                        'ansible_kernel_helper')
             config.set('defaults', 'callback_plugins', os.path.abspath(
                 pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
-            config.set('defaults', 'roles_path', os.path.abspath(
-                pkg_resources.resource_filename('ansible_kernel', 'roles')))
+            if config.has_option('defaults', 'roles_path'):
+                roles_path = config.get('defaults', 'roles_path')
+                roles_path = ":".join([os.path.abspath(x) for x in roles_path.split(":")])
+                roles_path = "{0}:{1}".format(roles_path,
+                                              os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'roles')))
+                config.set('defaults', 'roles_path', roles_path)
+            else:
+                config.set('defaults', 'roles_path', os.path.abspath(
+                    pkg_resources.resource_filename('ansible_kernel', 'roles')))
             config.set('defaults', 'inventory', 'inventory')
             if not config.has_section('callback_ansible_kernel_helper'):
                 config.add_section('callback_ansible_kernel_helper')
@@ -259,8 +267,11 @@ class AnsibleKernel(Kernel):
         if not self.silent:
 
             # Send standard output
+            logger.info("sending output")
             stream_content = {'name': 'stdout', 'text': str(output)}
             self.send_response(self.iopub_socket, 'stream', stream_content)
+        else:
+            logger.info("silent")
 
         logger.info("stop_processing %s", stop_processing)
         return stop_processing
@@ -376,6 +387,9 @@ class AnsibleKernel(Kernel):
         playbook.append(current_play)
         tasks = current_play['tasks'] = current_play.get('tasks', [])
         current_play['roles'] = current_play.get('roles', [])
+        for role in current_play['roles']:
+            if "." in role:
+                self.get_galaxy_role(role)
         current_play['roles'].insert(0, 'ansible_kernel_helpers')
 
         tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
@@ -390,7 +404,12 @@ class AnsibleKernel(Kernel):
         with open(self.playbook_file, 'w') as f:
             f.write(yaml.safe_dump(playbook, default_flow_style=False))
 
+        # Weird work around for streaming content not showing
+        stream_content = {'name': 'stdout', 'text': '\n'}
+        self.send_response(self.iopub_socket, 'stream', stream_content)
+        # End weird work around
         self.start_ansible_playbook()
+        logger.info("done")
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
@@ -417,7 +436,7 @@ class AnsibleKernel(Kernel):
                     logger.info("ansible is dead")
                     self.send_process_output()
                     self.do_shutdown(False)
-                    return
+                    break
                 msg = self.queue.get(timeout=1)
             except Empty:
                 logger.info("Empty!")
@@ -430,13 +449,17 @@ class AnsibleKernel(Kernel):
                 logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
                 break
 
+        logger.info("done")
+
 
     def send_process_output(self):
         output = self.ansible_process.communicate()[0]
+        logger.debug("process output %s", output)
         stream_content = {'name': 'stdout', 'text': str(output)}
         self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def do_execute_task(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
         if self.helper is None:
             output = "No play found. Run a valid play cell"
             stream_content = {'name': 'stdout', 'text': str(output)}
@@ -444,7 +467,6 @@ class AnsibleKernel(Kernel):
             return {'status': 'ok', 'execution_count': self.execution_count,
                     'payload': [], 'user_expressions': {}}
 
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
         self.current_task = code
         try:
             code_data = yaml.load(code)
@@ -475,6 +497,11 @@ class AnsibleKernel(Kernel):
                     'payload': [], 'user_expressions': {}}
         else:
             logger.error('code_data %s unsupported type', type(code_data))
+
+        if 'include_role' in code_data.keys():
+            role_name = code_data['include_role'].get('name', '')
+            if '.' in role_name:
+                self.get_galaxy_role(role_name)
 
         interrupted = False
         try:
@@ -681,7 +708,39 @@ class AnsibleKernel(Kernel):
 
         return {'status': 'ok', 'data': data, 'metadata': {}, 'found': True}
 
+    def get_galaxy_role(self, role_name):
+        logger = logging.getLogger('ansible_kernel.kernel.get_galaxy_role')
+
+        command = ['ansible-galaxy', 'list', '-p', 'roles']
+        logger.debug("command %s", command)
+        p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT)
+        p.wait()
+        exitcode = p.returncode
+        logger.debug('exitcode %s', exitcode)
+        output = p.communicate()[0]
+
+        for line in output.splitlines():
+            if line.startswith('- '):
+                role, _, version = line[2:].partition(',')
+                role = role.strip()
+                if role == role_name:
+                    return
+
+        p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT)
+        command = ['ansible-galaxy', 'install', '-p', 'roles', role_name]
+        logger.debug("command %s", command)
+        p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT)
+        p.wait()
+        exitcode = p.returncode
+        logger.debug('exitcode %s', exitcode)
+        output = p.communicate()[0]
+        logger.debug('output %s', output)
+        stream_content = {'name': 'stdout', 'text': str(output)}
+        self.send_response(self.iopub_socket, 'stream', stream_content)
+
+
     def get_module_doc(self, module):
+        logger = logging.getLogger('ansible_kernel.kernel.get_module_doc')
 
         data = {}
 

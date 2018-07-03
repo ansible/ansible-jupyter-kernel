@@ -40,7 +40,10 @@ class CallbackModule(CallbackBase):
         self.zmq_context = zmq.Context()
         self.socket = self.zmq_context.socket(zmq.PUSH)
         self.status_port = os.getenv('ANSIBLE_KERNEL_STATUS_PORT')
-        self.socket.connect("tcp://127.0.0.1:{0}".format(self.status_port))
+        if self.status_port:
+            self.socket.connect("tcp://127.0.0.1:{0}".format(self.status_port))
+        else:
+            self.socket = None
         self.task = None
         self.play = None
         self.hosts = []
@@ -64,6 +67,8 @@ class CallbackModule(CallbackBase):
 
     @debug
     def v2_playbook_on_handler_task_start(self, task):
+        if self.socket is None:
+            return
         args = ''
         if not task.no_log:
             args = u', '.join(u'%s=%s' % a for a in task.args.items())
@@ -74,6 +79,8 @@ class CallbackModule(CallbackBase):
 
     @debug
     def v2_runner_on_ok(self, result):
+        if self.socket is None:
+            return
         if isinstance(result._task, TaskInclude):
             return
         delegated_vars = result._result.get('_ansible_delegated_vars', {})
@@ -90,6 +97,8 @@ class CallbackModule(CallbackBase):
 
     @debug
     def v2_runner_on_failed(self, result, ignore_errors=False):
+        if self.socket is None:
+            return
         delegated_vars = result._result.get('_ansible_delegated_vars', {})
         self._clean_results(result._result, result._task.action)
         self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
@@ -104,6 +113,8 @@ class CallbackModule(CallbackBase):
 
     @debug
     def runner_on_unreachable(self, host, result, ignore_errors=False):
+        if self.socket is None:
+            return
         self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
                                                         device_name=host,
                                                         changed=False,
@@ -114,6 +125,8 @@ class CallbackModule(CallbackBase):
 
     @debug
     def v2_runner_item_on_skipped(self, result, ignore_errors=False):
+        if self.socket is None:
+            return
         self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
                                                         changed=False,
                                                         failed=False,
@@ -123,6 +136,8 @@ class CallbackModule(CallbackBase):
 
     @debug
     def DISABLED_v2_on_any(self, *args, **kwargs):
+        if self.socket is None:
+            return
         self._display.display("--- play: {} task: {} ---".format(getattr(self.play, 'name', None), self.task))
 
         self._display.display("     --- ARGS ")
@@ -135,6 +150,8 @@ class CallbackModule(CallbackBase):
 
     @debug
     def v2_playbook_on_play_start(self, play):
+        if self.socket is None:
+            return
         self.play = play
         self.hosts = play.get_variable_manager()._inventory.get_hosts()
 
@@ -143,6 +160,8 @@ class CallbackModule(CallbackBase):
 
     @debug
     def v2_playbook_on_task_start(self, task, is_conditional):
+        if self.socket is None:
+            return
         self.task = task
         args = ''
         if not task.no_log:
@@ -154,6 +173,8 @@ class CallbackModule(CallbackBase):
 
     @debug
     def v2_playbook_on_stats(self, stats):
+        if self.socket is None:
+            return
         for host in self.hosts:
             s = stats.summarize(host.get_name())
             status = "pass"
@@ -164,4 +185,5 @@ class CallbackModule(CallbackBase):
 
     @debug
     def v2_playbook_on_no_hosts_remaining(self):
-        pass
+        if self.socket is None:
+            return
