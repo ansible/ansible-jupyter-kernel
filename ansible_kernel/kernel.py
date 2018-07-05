@@ -527,7 +527,7 @@ class AnsibleKernel(Kernel):
                 f.write(yaml.safe_dump(tasks, default_flow_style=False))
             logger.info('Wrote %s', self.next_task_file)
 
-            self.helper.pause_socket.send('Proceed')
+            self.helper.pause_socket.send_string('Proceed')
 
             while True:
                 logger.info("getting message %s", self.helper.pause_socket_port)
