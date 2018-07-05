@@ -73,9 +73,9 @@ class CallbackModule(CallbackBase):
         if not task.no_log:
             args = u', '.join(u'%s=%s' % a for a in task.args.items())
             args = u' %s' % args
-        self.socket.send(json.dumps(['TaskStart', dict(task_name=task.get_name().strip(),
-                                                       task_arg=args,
-                                                       task_id=str(task._uuid))]))
+        self.socket.send_string(json.dumps(['TaskStart', dict(task_name=task.get_name().strip(),
+                                                              task_arg=args,
+                                                              task_id=str(task._uuid))]))
 
     @debug
     def v2_runner_on_ok(self, result):
@@ -85,15 +85,15 @@ class CallbackModule(CallbackBase):
             return
         delegated_vars = result._result.get('_ansible_delegated_vars', {})
         self._clean_results(result._result, result._task.action)
-        self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
-                                                        device_name=result._host.get_name(),
-                                                        delegated_host_name=str(delegated_vars.get('ansible_host', '')),
-                                                        changed=result._result.get('changed', False),
-                                                        failed=False,
-                                                        unreachable=False,
-                                                        skipped=False,
-                                                        results=self._dump_results(result._result),
-                                                        task_id=str(result._task._uuid))]))
+        self.socket.send_string(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
+                                                               device_name=result._host.get_name(),
+                                                               delegated_host_name=str(delegated_vars.get('ansible_host', '')),
+                                                               changed=result._result.get('changed', False),
+                                                               failed=False,
+                                                               unreachable=False,
+                                                               skipped=False,
+                                                               results=self._dump_results(result._result),
+                                                               task_id=str(result._task._uuid))]))
 
     @debug
     def v2_runner_on_failed(self, result, ignore_errors=False):
@@ -101,38 +101,38 @@ class CallbackModule(CallbackBase):
             return
         delegated_vars = result._result.get('_ansible_delegated_vars', {})
         self._clean_results(result._result, result._task.action)
-        self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
-                                                        device_name=result._host.get_name(),
-                                                        changed=False,
-                                                        failed=True,
-                                                        unreachable=False,
-                                                        skipped=False,
-                                                        delegated_host_name=str(delegated_vars.get('ansible_host', '')),
-                                                        results=self._dump_results(result._result),
-                                                        task_id=str(result._task._uuid))]))
+        self.socket.send_string(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
+                                                               device_name=result._host.get_name(),
+                                                               changed=False,
+                                                               failed=True,
+                                                               unreachable=False,
+                                                               skipped=False,
+                                                               delegated_host_name=str(delegated_vars.get('ansible_host', '')),
+                                                               results=self._dump_results(result._result),
+                                                               task_id=str(result._task._uuid))]))
 
     @debug
     def runner_on_unreachable(self, host, result, ignore_errors=False):
         if self.socket is None:
             return
-        self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
-                                                        device_name=host,
-                                                        changed=False,
-                                                        failed=False,
-                                                        unreachable=True,
-                                                        skipped=False,
-                                                        task_id=str(self.task._uuid))]))
+        self.socket.send_string(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
+                                                               device_name=host,
+                                                               changed=False,
+                                                               failed=False,
+                                                               unreachable=True,
+                                                               skipped=False,
+                                                               task_id=str(self.task._uuid))]))
 
     @debug
     def v2_runner_item_on_skipped(self, result, ignore_errors=False):
         if self.socket is None:
             return
-        self.socket.send(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
-                                                        changed=False,
-                                                        failed=False,
-                                                        unreachable=False,
-                                                        skipped=True,
-                                                        task_id=str(result._task._uuid))]))
+        self.socket.send_string(json.dumps(['TaskStatus', dict(task_name=self.task.get_name().strip(),
+                                                               changed=False,
+                                                               failed=False,
+                                                               unreachable=False,
+                                                               skipped=True,
+                                                               task_id=str(result._task._uuid))]))
 
     @debug
     def DISABLED_v2_on_any(self, *args, **kwargs):
@@ -156,7 +156,7 @@ class CallbackModule(CallbackBase):
         self.hosts = play.get_variable_manager()._inventory.get_hosts()
 
         for host in self.hosts:
-            self.socket.send(json.dumps(['DeviceStatus', dict(name=host.get_name())]))
+            self.socket.send_string(json.dumps(['DeviceStatus', dict(name=host.get_name())]))
 
     @debug
     def v2_playbook_on_task_start(self, task, is_conditional):
@@ -167,9 +167,9 @@ class CallbackModule(CallbackBase):
         if not task.no_log:
             args = u', '.join(u'%s=%s' % a for a in task.args.items())
             args = u' %s' % args
-        self.socket.send(json.dumps(['TaskStart', dict(task_name=task.get_name().strip(),
-                                                       task_arg=args,
-                                                       task_id=str(task._uuid))]))
+        self.socket.send_string(json.dumps(['TaskStart', dict(task_name=task.get_name().strip(),
+                                                              task_arg=args,
+                                                              task_id=str(task._uuid))]))
 
     @debug
     def v2_playbook_on_stats(self, stats):
@@ -180,8 +180,8 @@ class CallbackModule(CallbackBase):
             status = "pass"
             status = "fail" if s['failures'] > 0 else status
             status = "fail" if s['unreachable'] > 0 else status
-            self.socket.send(json.dumps(['DeviceStatus', dict(name=host.get_name())]))
-        self.socket.send(json.dumps(['PlaybookEnded', dict()]))
+            self.socket.send_string(json.dumps(['DeviceStatus', dict(name=host.get_name())]))
+        self.socket.send_string(json.dumps(['PlaybookEnded', dict()]))
 
     @debug
     def v2_playbook_on_no_hosts_remaining(self):

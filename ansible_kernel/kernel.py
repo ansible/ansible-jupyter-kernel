@@ -36,7 +36,7 @@ TaskCompletionMessage = namedtuple('TaskCompletionMessage', ['task_num'])
 
 TASK_ARGS_MODULES = modules + task_args
 
-__version__ = '0.3'
+__version__ = '0.4'
 
 logger = logging.getLogger('ansible_kernel.kernel')
 
@@ -527,7 +527,7 @@ class AnsibleKernel(Kernel):
                 f.write(yaml.safe_dump(tasks, default_flow_style=False))
             logger.info('Wrote %s', self.next_task_file)
 
-            self.helper.pause_socket.send('Proceed')
+            self.helper.pause_socket.send_string('Proceed')
 
             while True:
                 logger.info("getting message %s", self.helper.pause_socket_port)

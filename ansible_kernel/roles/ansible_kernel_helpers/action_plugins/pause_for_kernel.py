@@ -24,7 +24,7 @@ class ActionModule(ActionBase):
         socket.connect("tcp://{0}:{1}".format(host, port))
         print ('connected')
         print ('sending...')
-        socket.send("{0}".format(task_num))
+        socket.send_string("{0}".format(task_num))
         print ('sent')
         print ('waiting...')
         print (socket.recv())
