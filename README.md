@@ -82,7 +82,24 @@ register: output
 
 #### #host_vars
 
+This takes an argument that represents the hostname.  Variables
+defined in this file will be available in the tasks for that host.
+
+```
+#host_vars Host1
+hostname: host1
+```
+
 #### #group_vars
+
+This takes an argument that represents the group name.  Variables
+defined in this file will be available in the tasks for hosts in that
+group.
+
+```
+#group_vars BranchOfficeX
+gateway: 192.168.1.254
+```
 
 #### #vars
 
@@ -90,7 +107,7 @@ This takes an argument that represents the filename for use in later cells
 
 ```
 #vars example_vars
-message hello vars
+message: hello vars
 ```
 
 ```

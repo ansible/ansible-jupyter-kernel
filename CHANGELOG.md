@@ -2,7 +2,15 @@
 
 ## Unreleased
 
+## [0.4] - 2018-07-05
+
+### Fixes
+- Python 3: Encodes unicode messages for ZMQ properly
+
+### Added
 - Module argument cache
+- Role support
+- Automation Ansible Galaxy role installation
 
 ## [0.3] - 2018-06-28
 ### Fixes
