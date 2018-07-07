@@ -29,12 +29,22 @@ with `Jupyter` automatically.
 
 ## Usage
 
+### Local install
+
 ```
     jupyter notebook
     # In the notebook interface, select Ansible from the 'New' menu
 ```
 
-### Using the Cells
+### Container
+
+    docker run -p 8888:8888 benthomasson/ansible-jupyter-kernel:v0.4
+
+    Then copy the URL from the output into your browser:
+    http://localhost:8888/?token=ABCD1234
+
+
+## Using the Cells
 
 Normally `Ansible` brings together various components in different files and locations to launch a playbook and performs automation tasks. For this
 `jupyter` interface you need to provide this information in cells by denoting what the cell contains and then finally writing your tasks that will make
