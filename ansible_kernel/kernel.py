@@ -134,7 +134,7 @@ class AnsibleKernel(Kernel):
         self.task_files = []
         self.playbook_file = None
         self.silent = False
-        self.default_inventory = "[all]\nlocalhost\n"
+        self.default_inventory = "[all]\nlocalhost ansible_connection=local\n"
         self.default_play = yaml.dump(dict(hosts='localhost',
                                            name='default',
                                            gather_facts=False))

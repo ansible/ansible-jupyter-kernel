@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- Fixed connection to localhost to use local connection type
+
 ### Added
 
 - Dockerfile
