@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Dockerfile
+
 ## [0.4] - 2018-07-05
 
 ### Fixes
@@ -10,7 +14,7 @@
 ### Added
 - Module argument cache
 - Role support
-- Automation Ansible Galaxy role installation
+- Automatic Ansible Galaxy role installation
 
 ## [0.3] - 2018-06-28
 ### Fixes
