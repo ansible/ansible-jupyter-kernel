@@ -20,9 +20,9 @@ CMD /entrypoint.sh
 ADD utils/entrypoint.sh /entrypoint.sh
 ADD notebooks /notebooks
 ADD tests /tests
-ADD dist/ansible_kernel-0.4-py2.py3-none-any.whl /ansible_kernel-0.4-py2.py3-none-any.whl
+ADD dist/ansible_kernel-0.4.1-py2.py3-none-any.whl /ansible_kernel-0.4.1-py2.py3-none-any.whl
 RUN chmod 755 /entrypoint.sh && \
     chmod g+w /etc/passwd && \
-    pip install --no-cache-dir /ansible_kernel-0.4-py2.py3-none-any.whl && \
+    pip install --no-cache-dir /ansible_kernel-0.4.1-py2.py3-none-any.whl && \
     python -m ansible_kernel.install
 EXPOSE 8888
