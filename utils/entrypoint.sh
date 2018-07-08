@@ -9,4 +9,5 @@ if [ `id -u` -ge 500 ]; then
     cat /tmp/passwd >> /etc/passwd
     rm /tmp/passwd
 fi
+cd /notebooks
 jupyter-notebook --ip 0.0.0.0 --allow-root --no-browser
