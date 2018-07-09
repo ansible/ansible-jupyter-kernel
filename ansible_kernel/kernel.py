@@ -258,6 +258,12 @@ class AnsibleKernel(Kernel):
             if message_data.get('results', None):
                 output += " => "
                 output += message_data['results']
+            if message_data.get('output', None):
+                output += "\n\n[%s] stdout:\n" % message_data['device_name']
+                output += message_data['output']
+            if message_data.get('error', None):
+                output += "\n\n[%s] stderr:\n" % message_data['device_name']
+                output += message_data['error']
             output += "\n"
         else:
             output = str(message)

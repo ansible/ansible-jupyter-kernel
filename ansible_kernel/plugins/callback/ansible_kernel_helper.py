@@ -48,17 +48,38 @@ class CallbackModule(CallbackBase):
         self.play = None
         self.hosts = []
 
+    def _format_output(self, result):
+        if 'stdout_lines' in result:
+            return '\n'.join(result['stdout_lines'])
+        return ""
+
+    def _format_error(self, result):
+        if 'stderr_lines' in result:
+            return '\n'.join(result['stderr_lines'])
+        return ""
 
     def _dump_results(self, result):
 
         r = result.copy()
         if 'invocation' in r:
             del r['invocation']
+        if 'stdout' in r:
+            if r['stdout']:
+                r['stdout'] = '[see below]'
+        if 'stdout_lines' in r:
+            if r['stdout_lines']:
+                r['stdout_lines']  = '[removed for clarity]'
+        if 'stderr' in r:
+            if r['stderr']:
+                r['stderr'] = '[see below]'
+        if 'stderr_lines' in r:
+            if r['stderr_lines']:
+                r['stderr_lines']  = '[removed for clarity]'
         if 'changed' in r:
             del r['changed']
         if 'reason' in r:
             return r['reason']
-        return super(CallbackModule, self)._dump_results(r)
+        return super(CallbackModule, self)._dump_results(r, indent=4, sort_keys=True)
 
 
     @debug
@@ -93,6 +114,8 @@ class CallbackModule(CallbackBase):
                                                                unreachable=False,
                                                                skipped=False,
                                                                results=self._dump_results(result._result),
+                                                               output=self._format_output(result._result),
+                                                               error=self._format_error(result._result),
                                                                task_id=str(result._task._uuid))]))
 
     @debug
@@ -109,6 +132,8 @@ class CallbackModule(CallbackBase):
                                                                skipped=False,
                                                                delegated_host_name=str(delegated_vars.get('ansible_host', '')),
                                                                results=self._dump_results(result._result),
+                                                               output=self._format_output(result._result),
+                                                               error=self._format_error(result._result),
                                                                task_id=str(result._task._uuid))]))
 
     @debug
