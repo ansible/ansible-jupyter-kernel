@@ -780,10 +780,16 @@ class AnsibleKernel(Kernel):
 
         if self.is_ansible_alive():
             logger.info('killing ansible {0}'.format(self.ansible_process.pid))
-            self.ansible_process.kill()
+            try:
+                self.ansible_process.kill()
+            except psutil.NoSuchProcess:
+                logger.info('process already dead {0}'.format(self.ansible_process.pid))
             for child in children:
                 logger.info('killing ansible sub {0}'.format(child.pid))
-                child.kill()
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    logger.info('process already dead {0}'.format(child.pid))
 
         logger.info('stopping helper')
         self.helper.stop()
