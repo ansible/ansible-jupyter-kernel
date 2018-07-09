@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.2] - 2018-07-09
+
+### Fixes
+
+- Kernel crash when ansible-playbook shuts down.
+
 ## [0.4.1] - 2018-07-08
 
 ### Fixes
