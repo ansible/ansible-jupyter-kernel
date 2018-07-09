@@ -1,11 +1,13 @@
 # Ansible Jupyter Kernel
 
-[![Demo](https://raw.githubusercontent.com/ansible/ansible-jupyter-kernel/master/docs/ansible_jupyter_kernel_vimeo.png)](https://vimeo.com/279049946 "Run Ansible Tasks from Jupyter Notebook - Click to Watch!")
-
-
 ![Example Jupyter Usage](https://raw.githubusercontent.com/ansible/ansible-jupyter-kernel/master/docs/example_session.png)
 
 The Ansible [Jupyter](http://jupyter.readthedocs.io/en/latest/) Kernel adds a kernel backend for Jupyter to interface directly with Ansible and construct plays and tasks and execute them on the fly.
+
+## Demo
+
+[![Demo](https://raw.githubusercontent.com/ansible/ansible-jupyter-kernel/master/docs/ansible_jupyter_kernel_vimeo.png)](https://vimeo.com/279049946 "Run Ansible Tasks from Jupyter Notebook - Click to Watch!")
+
 
 ## Table of Contents
 
