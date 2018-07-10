@@ -27,10 +27,12 @@ with `Jupyter` automatically.
 ### From pypi
 
     pip install ansible-kernel
+    python -m ansible_kernel.install
 
 ### From a local checkout
 
     pip install -e .
+    python -m ansible_kernel.install
 
 ## Usage
 
