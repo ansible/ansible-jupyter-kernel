@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Improves shell output display
+
 ## [0.4.2] - 2018-07-09
 
 ### Fixes
