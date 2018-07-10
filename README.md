@@ -34,6 +34,11 @@ with `Jupyter` automatically.
     pip install -e .
     python -m ansible_kernel.install
 
+### For Anaconda/Miniconda
+
+    pip install ansible-kernel
+    python -m ansible_kernel.install --sys-prefix
+
 ## Usage
 
 ### Local install
