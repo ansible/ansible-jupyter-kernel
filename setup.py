@@ -50,6 +50,7 @@ setup(
         'jupyter',
         'tqdm',
         'docopt',
+        'six',
     ],
     entry_points={
         "nbconvert.exporters" : [

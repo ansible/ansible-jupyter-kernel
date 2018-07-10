@@ -16,18 +16,19 @@ import json
 import traceback
 import tempfile
 import psutil
-from Queue import Queue, Empty
+import six
+from six.moves import queue
 from collections import namedtuple
 
 import zmq
 from zmq.eventloop.zmqstream import ZMQStream
 
-from modules import modules
-from module_args import module_args
-from task_args import task_args
-from play_args import play_args
+from .modules import modules
+from .module_args import module_args
+from .task_args import task_args
+from .play_args import play_args
 
-from ConfigParser import SafeConfigParser
+from six.moves import configparser
 from zmq.eventloop.ioloop import IOLoop
 
 StatusMessage = namedtuple('StatusMessage', ['message'])
@@ -139,7 +140,7 @@ class AnsibleKernel(Kernel):
                                            name='default',
                                            gather_facts=False))
         self.temp_dir = tempfile.mkdtemp(prefix="ansible_kernel_playbook")
-        self.queue = Queue()
+        self.queue = queue.Queue()
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
@@ -152,9 +153,9 @@ class AnsibleKernel(Kernel):
         self.helper = AnsibleKernelHelpersThread(self.queue)
         self.helper.start()
         logger.info("Started helper")
-        config = SafeConfigParser()
+        config = configparser.SafeConfigParser()
         if self.ansible_cfg is not None:
-            config.readfp(io.BytesIO(self.ansible_cfg))
+            config.readfp(six.StringIO(self.ansible_cfg))
         with open(os.path.join(self.temp_dir, 'ansible.cfg'), 'w') as f:
             if not config.has_section('defaults'):
                 config.add_section('defaults')
@@ -322,9 +323,9 @@ class AnsibleKernel(Kernel):
     def do_ansible_cfg(self, code):
         logger = logging.getLogger('ansible_kernel.kernel.do_ansible_cfg')
         self.ansible_cfg = str(code)
-        config = SafeConfigParser()
+        config = configparser.SafeConfigParser()
         if self.ansible_cfg is not None:
-            config.readfp(io.BytesIO(self.ansible_cfg))
+            config.readfp(six.StringIO(self.ansible_cfg))
         logger.info("ansible.cfg set to %s", code)
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
@@ -444,7 +445,7 @@ class AnsibleKernel(Kernel):
                     self.do_shutdown(False)
                     break
                 msg = self.queue.get(timeout=1)
-            except Empty:
+            except queue.Empty:
                 logger.info("Empty!")
                 continue
             logger.info(msg)
@@ -459,7 +460,7 @@ class AnsibleKernel(Kernel):
 
 
     def send_process_output(self):
-        output = self.ansible_process.communicate()[0]
+        output = self.ansible_process.communicate()[0].decode('utf-8')
         logger.debug("process output %s", output)
         stream_content = {'name': 'stdout', 'text': str(output)}
         self.send_response(self.iopub_socket, 'stream', stream_content)
@@ -481,7 +482,7 @@ class AnsibleKernel(Kernel):
         logger.debug('code_data %s', code_data)
         logger.debug('code_data type: %s', type(code_data))
 
-        if isinstance(code_data, basestring):
+        if isinstance(code_data, str):
             if (code_data.endswith("?")):
                 module = code_data[:-1].split()[-1]
             else:
@@ -699,7 +700,7 @@ class AnsibleKernel(Kernel):
 
         logger.debug("code_data %s", code_data)
 
-        if isinstance(code_data, basestring):
+        if isinstance(code_data, str):
             module = code_data
         elif isinstance(code_data, dict):
             for arg in task_args:
@@ -723,7 +724,7 @@ class AnsibleKernel(Kernel):
         p.wait()
         exitcode = p.returncode
         logger.debug('exitcode %s', exitcode)
-        output = p.communicate()[0]
+        output = p.communicate()[0].decode('utf-8')
 
         for line in output.splitlines():
             if line.startswith('- '):
@@ -732,14 +733,14 @@ class AnsibleKernel(Kernel):
                 if role == role_name:
                     return
 
-        p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT)
+        p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT, )
         command = ['ansible-galaxy', 'install', '-p', 'roles', role_name]
         logger.debug("command %s", command)
-        p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT)
+        p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT, )
         p.wait()
         exitcode = p.returncode
         logger.debug('exitcode %s', exitcode)
-        output = p.communicate()[0]
+        output = p.communicate()[0].decode('utf-8')
         logger.debug('output %s', output)
         stream_content = {'name': 'stdout', 'text': str(output)}
         self.send_response(self.iopub_socket, 'stream', stream_content)
@@ -753,11 +754,11 @@ class AnsibleKernel(Kernel):
         logger.debug("command %s", " ".join(
             ['ansible-doc', '-t', 'module', module]))
         p = Popen(['ansible-doc', '-t', 'module', module],
-                  stdout=PIPE, stderr=STDOUT)
+                  stdout=PIPE, stderr=STDOUT, )
         p.wait()
         exitcode = p.returncode
         logger.debug('exitcode %s', exitcode)
-        output = p.communicate()[0]
+        output = p.communicate()[0].decode('utf-8')
         logger.debug('output %s', output)
         data['text/plain'] = output
 
