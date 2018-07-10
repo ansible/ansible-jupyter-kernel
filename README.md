@@ -45,7 +45,7 @@ with `Jupyter` automatically.
 
 ### Container
 
-    docker run -p 8888:8888 benthomasson/ansible-jupyter-kernel:v0.4
+    docker run -p 8888:8888 benthomasson/ansible-jupyter-kernel
 
     Then copy the URL from the output into your browser:
     http://localhost:8888/?token=ABCD1234

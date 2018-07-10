@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## [0.5.0] - 2018-07-10
 
 ### Fixes
+
 - Python 3: Multiple fixes for package names that have changed
-- Python 3: Sring to/from byte conversions.
+- Python 3: String to/from byte conversions.
 
 ### Changed
 
