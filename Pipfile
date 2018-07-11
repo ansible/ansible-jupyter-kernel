@@ -15,5 +15,6 @@ singledispatch = "*"
 pytest = "*"
 backports-abc = "*"
 defusedxml = "*"
+ansible-runner = "*"
 
 [dev-packages]

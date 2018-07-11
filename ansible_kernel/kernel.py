@@ -17,6 +17,8 @@ import traceback
 import tempfile
 import psutil
 import six
+import shutil
+import pprint
 from six.moves import queue
 from collections import namedtuple
 
@@ -30,6 +32,9 @@ from .play_args import play_args
 
 from six.moves import configparser
 from zmq.eventloop.ioloop import IOLoop
+
+import ansible_runner
+
 
 StatusMessage = namedtuple('StatusMessage', ['message'])
 TaskCompletionMessage = namedtuple('TaskCompletionMessage', ['task_num'])
@@ -133,6 +138,8 @@ class AnsibleKernel(Kernel):
         self.task_files = []
         self.playbook_file = None
         self.silent = False
+        self.runner = None
+        self.runner_thread = None
         self.default_inventory = "[all]\nlocalhost ansible_connection=local\n"
         self.default_play = yaml.dump(dict(hosts='localhost',
                                            name='default',
@@ -154,14 +161,16 @@ class AnsibleKernel(Kernel):
         config = configparser.SafeConfigParser()
         if self.ansible_cfg is not None:
             config.readfp(six.StringIO(self.ansible_cfg))
-        with open(os.path.join(self.temp_dir, 'ansible.cfg'), 'w') as f:
+        if not os.path.exists(os.path.join(self.temp_dir, 'project')):
+            os.mkdir(os.path.join(self.temp_dir, 'project'))
+        with open(os.path.join(self.temp_dir, 'project', 'ansible.cfg'), 'w') as f:
             if not config.has_section('defaults'):
                 config.add_section('defaults')
-            config.set('defaults', 'stdout_callback', 'null')
-            config.set('defaults', 'callback_whitelist',
-                       'ansible_kernel_helper')
-            config.set('defaults', 'callback_plugins', os.path.abspath(
-                pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
+            #config.set('defaults', 'stdout_callback', 'null')
+            #config.set('defaults', 'callback_whitelist',
+            #           'ansible_kernel_helper')
+            #config.set('defaults', 'callback_plugins', os.path.abspath(
+            #    pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
             if config.has_option('defaults', 'roles_path'):
                 roles_path = config.get('defaults', 'roles_path')
                 roles_path = ":".join([os.path.abspath(x) for x in roles_path.split(":")])
@@ -192,6 +201,22 @@ class AnsibleKernel(Kernel):
             if os.path.exists(task_file):
                 os.unlink(task_file)
         self.task_files = []
+
+    def runner_process_message(self, data):
+        logger = logging.getLogger('ansible_kernel.kernel.runner_process_message')
+        logger.info("runner message:\n{}".format(pprint.pformat(data)))
+        if 'stdout' in data:
+            stdout_actual = data['stdout']
+            if 'event_data' in data and 'task' in data['event_data']:
+                if data['event_data']['task'] == 'pause_for_kernel':
+                    return
+                if data['event_data']['task'] == 'include_tasks':
+                    return
+                if 'res' in data['event_data'] and 'stdout' in data['event_data']['res'] and data['event_data']['res']['stdout']:
+                    stdout_actual = "{}\n{}".format(stdout_actual, data['event_data']['res']['stdout'])
+            stream_content = dict(name='stdout',
+                                  text="{}\n".format(stdout_actual))
+            self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def process_message(self, message):
         logger.info("message %s", message)
@@ -396,7 +421,9 @@ class AnsibleKernel(Kernel):
 
         logger.debug(yaml.safe_dump(playbook, default_flow_style=False))
 
-        self.playbook_file = (os.path.join(self.temp_dir, 'playbook.yml'))
+        if not os.path.exists(os.path.join(self.temp_dir, 'project')):
+            os.mkdir(os.path.join(self.temp_dir, 'project'))
+        self.playbook_file = (os.path.join(self.temp_dir, 'project', 'playbook.yml'))
         with open(self.playbook_file, 'w') as f:
             f.write(yaml.safe_dump(playbook, default_flow_style=False))
 
@@ -411,27 +438,36 @@ class AnsibleKernel(Kernel):
 
     def start_ansible_playbook(self):
 
-        command = ['ansible-playbook', 'playbook.yml']
-
-        logger.info("command %s", command)
-
+        #command = ['ansible-playbook', 'playbook.yml']
+        #logger.info("command %s", command)
+        logger.info("runner starting")
         env = os.environ.copy()
         env['ANSIBLE_KERNEL_STATUS_PORT'] = str(self.helper.status_socket_port)
+        self.runner_thread, self.runner = ansible_runner.run_async(private_data_dir=self.temp_dir,
+                                                                   playbook="playbook.yml",
+                                                                   debug=True,
+                                                                   ignore_logging=True,
+                                                                   event_handler=self.runner_process_message)
+        logger.info("runner started")
+        
+        #We may need to purge artifacts when we start again
+        #shutil.rmtree(os.path.join(self.temp_dir, 'artifacts'))
 
-        self.ansible_process = Popen(command,
-                                     cwd=self.temp_dir,
-                                     env=env,
-                                     stdout=PIPE,
-                                     stderr=STDOUT)
-
-        while True:
-            logger.info("getting message %s", self.helper.pause_socket_port)
+        logger.info("Runner status: {}".format(self.runner.status))
+        while self.runner.status in ['unstarted', 'running', 'starting']:
+            logger.info("In runner loop")
+            #has_messages = False
             try:
-                if not self.is_ansible_alive():
-                    logger.info("ansible is dead")
-                    self.send_process_output()
-                    self.do_shutdown(False)
-                    break
+                for event in self.runner.events:
+                    logger.info(event)
+                    self.runner_process_message(event)
+                    #self.process_message(event)
+            except ansible_runner.exceptions.AnsibleRunnerException as e:
+                logger.info("Runner Exception: {}".format(e))
+            #if has_messages:
+            #    self.helper.pause_socket.send_string('Proceed')
+
+            try:
                 msg = self.queue.get(timeout=1)
             except queue.Empty:
                 logger.info("Empty!")
@@ -443,6 +479,36 @@ class AnsibleKernel(Kernel):
             elif isinstance(msg, TaskCompletionMessage):
                 logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
                 break
+
+            logger.info("Bottom of runner loop")
+            time.sleep(1)
+        logger.info("Runner state is now {}".format(self.runner.status))
+        self.clean_up_task_files()
+        # self.ansible_process = Popen(command,
+        #                              cwd=self.temp_dir,
+        #                              env=env,
+        #                              stdout=PIPE,
+        #                              stderr=STDOUT)
+
+        # while True:
+        #     logger.info("getting message %s", self.helper.pause_socket_port)
+        #     try:
+        #         if not self.is_ansible_alive():
+        #             logger.info("ansible is dead")
+        #             self.send_process_output()
+        #             self.do_shutdown(False)
+        #             break
+        #         msg = self.queue.get(timeout=1)
+        #     except queue.Empty:
+        #         logger.info("Empty!")
+        #         continue
+        #     logger.info(msg)
+        #     if isinstance(msg, StatusMessage):
+        #         if self.process_message(msg.message):
+        #             break
+        #     elif isinstance(msg, TaskCompletionMessage):
+        #         logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
+        #         break
 
         logger.info("done")
 
@@ -513,7 +579,7 @@ class AnsibleKernel(Kernel):
 
             logger.debug(yaml.safe_dump(tasks, default_flow_style=False))
 
-            self.next_task_file = os.path.join(self.temp_dir,
+            self.next_task_file = os.path.join(self.temp_dir, 'project',
                                                'next_task{0}.yml'.format(self.tasks_counter))
             self.tasks_counter += 1
             self.task_files.append(self.next_task_file)
