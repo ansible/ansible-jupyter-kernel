@@ -31,6 +31,8 @@ Reactions
 * [Tue Jun 12 12:41:09 EDT 2018] chrismeyers:  that'd be hot.  patent that.
 * [Tue Jun 12 15:44:31 EDT 2018] matburt :open_mouth: wowsa how do I get this hotness?
 * [Wed Jun 13 2018] docschick: You've earned your brownies.
+* [Jun 27 2018] @rrrrrrrix: holy shit
+* [July 9th 2018 10:45 AM ] shanemcd: awesome. i love this btw.
 
 
 Jupyter Notebook Technical Details
@@ -97,10 +99,11 @@ for use the Juypter notebooks and add to AWX.
 Tasks:
 
 - Legal license approval (done)
-- Release manager approval
-- Add to public repo under ansible
-- Add all the standard python packaging files
-- Push module to PYPI
+- Release manager approval (done)
+- Add to public repo under ansible (done)
+- Add all the standard python packaging files (done)
+- Push module to PYPI (done)
+- Push container to dockerhub (done)
 - Add awx integration
 - Test by converting tutorials to notebooks
 - Write blog post
