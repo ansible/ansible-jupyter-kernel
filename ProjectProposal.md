@@ -32,7 +32,7 @@ Reactions
 * [Tue Jun 12 15:44:31 EDT 2018] matburt :open_mouth: wowsa how do I get this hotness?
 * [Wed Jun 13 2018] docschick: You've earned your brownies.
 * [Jun 27 2018] @rrrrrrrix: holy shit
-* [July 9th 2018 10:45 AM ] shanemcd: awesome. i love this btw.
+* [July 9th 2018 10:45 AM ] shanemcd: i love this btw. i’ve always wanted something like it.
 
 
 Jupyter Notebook Technical Details
