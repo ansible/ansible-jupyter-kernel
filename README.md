@@ -1,5 +1,8 @@
 # Ansible Jupyter Kernel
 
+[![Binder](https://mybinder.org/badge.svg)](https://mybinder.org/v2/gh/ansible/ansible-jupyter-kernel/master)
+
+
 ![Example Jupyter Usage](https://raw.githubusercontent.com/ansible/ansible-jupyter-kernel/master/docs/example_session.png)
 
 The Ansible [Jupyter](http://jupyter.readthedocs.io/en/latest/) Kernel adds a kernel backend for Jupyter to interface directly with Ansible and construct plays and tasks and execute them on the fly.
