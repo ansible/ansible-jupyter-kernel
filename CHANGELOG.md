@@ -5,6 +5,7 @@
 ### Added
 
 - Ansible playbook to Jupyter notebook format converter
+- Export a notebook to an Ansible bundle zip file containing the playbook, inventory, etc
 
 ## [0.5.0] - 2018-07-10
 
