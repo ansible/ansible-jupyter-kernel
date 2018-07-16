@@ -149,7 +149,8 @@ class AnsibleKernel(Kernel):
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
-        os.mkdir(os.path.join(self.temp_dir, 'roles'))
+        os.mkdir(os.path.join(self.temp_dir, 'project'))
+        os.mkdir(os.path.join(self.temp_dir, 'project', 'roles'))
         self.do_inventory(self.default_inventory)
         self.do_execute_play(self.default_play)
         logger.info("Kernel init finished took %s", time.time() - start_time)
@@ -335,7 +336,7 @@ class AnsibleKernel(Kernel):
 
     def do_inventory(self, code):
         logger.info("inventory set to %s", code)
-        with open(os.path.join(self.temp_dir, 'inventory'), 'w') as f:
+        with open(os.path.join(self.temp_dir, 'project', 'inventory'), 'w') as f:
             f.write(code)
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
@@ -353,7 +354,7 @@ class AnsibleKernel(Kernel):
         code_lines = code.strip().splitlines(True)
         host = code_lines[0][len('#host_vars'):].strip()
         logger.debug("host %s", host)
-        host_vars = os.path.join(self.temp_dir, 'host_vars')
+        host_vars = os.path.join(self.temp_dir, 'project', 'host_vars')
         if not os.path.exists(host_vars):
             os.mkdir(host_vars)
         with open(os.path.join(host_vars, host), 'w') as f:
@@ -365,7 +366,7 @@ class AnsibleKernel(Kernel):
         code_lines = code.strip().splitlines(True)
         vars = code_lines[0][len('#vars'):].strip()
         logger.debug("vars %s", vars)
-        with open(os.path.join(self.temp_dir, vars), 'w') as f:
+        with open(os.path.join(self.temp_dir, 'project', vars), 'w') as f:
             f.write("".join(code_lines[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
@@ -374,7 +375,7 @@ class AnsibleKernel(Kernel):
         code_lines = code.strip().splitlines(True)
         template = code_lines[0][len('#template'):].strip()
         logger.debug("template %s", template)
-        with open(os.path.join(self.temp_dir, template), 'w') as f:
+        with open(os.path.join(self.temp_dir, 'project', template), 'w') as f:
             f.write("".join(code_lines[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
@@ -383,7 +384,7 @@ class AnsibleKernel(Kernel):
         code_lines = code.strip().splitlines(True)
         group = code_lines[0][len('#group_vars'):].strip()
         logger.debug("group %s", group)
-        group_vars = os.path.join(self.temp_dir, 'group_vars')
+        group_vars = os.path.join(self.temp_dir, 'project', 'group_vars')
         if not os.path.exists(group_vars):
             os.mkdir(group_vars)
         with open(os.path.join(group_vars, group), 'w') as f:
@@ -767,7 +768,7 @@ class AnsibleKernel(Kernel):
 
     def get_galaxy_role(self, role_name):
 
-        command = ['ansible-galaxy', 'list', '-p', 'roles']
+        command = ['ansible-galaxy', 'list', '-p', 'project/roles']
         logger.debug("command %s", command)
         p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT)
         p.wait()
@@ -783,7 +784,7 @@ class AnsibleKernel(Kernel):
                     return
 
         p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT, )
-        command = ['ansible-galaxy', 'install', '-p', 'roles', role_name]
+        command = ['ansible-galaxy', 'install', '-p', 'project/roles', role_name]
         logger.debug("command %s", command)
         p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT, )
         p.wait()
