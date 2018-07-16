@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Ansible playbook to Jupyter notebook format converter
+
 ## [0.5.0] - 2018-07-10
 
 ### Fixes
