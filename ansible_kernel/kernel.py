@@ -15,9 +15,7 @@ import logging
 import json
 import traceback
 import tempfile
-import psutil
 import six
-import shutil
 import pprint
 from six.moves import queue
 from collections import namedtuple
@@ -140,6 +138,8 @@ class AnsibleKernel(Kernel):
         self.silent = False
         self.runner = None
         self.runner_thread = None
+        self.shutdown_requested = False
+        self.shutdown = False
         self.default_inventory = "[all]\nlocalhost ansible_connection=local\n"
         self.default_play = yaml.dump(dict(hosts='localhost',
                                            name='default',
@@ -447,6 +447,7 @@ class AnsibleKernel(Kernel):
                                                                    playbook="playbook.yml",
                                                                    debug=True,
                                                                    ignore_logging=True,
+                                                                   cancel_callback=self.cancel_callback,
                                                                    event_handler=self.runner_process_message)
         logger.info("runner started")
         
@@ -812,43 +813,35 @@ class AnsibleKernel(Kernel):
         return data
 
     def is_ansible_alive(self):
-        if self.ansible_process is None:
+        logger = logging.getLogger('ansible_kernel.kernel.is_ansible_alive')
+        if self.runner_thread is None:
+            logger.info("NOT STARTED")
             return False
-        return self.ansible_process.poll() is None
+        if self.runner_thread.is_alive():
+            logger.info("YES")
+        else:
+            logger.info("NO")
+        return self.runner_thread.is_alive()
+
+    def cancel_callback(self):
+        logger = logging.getLogger('ansible_kernel.kernel.cancel_callback')
+        logger.info('called')
+        self.shutdown = True
+        return self.shutdown_requested
 
     def do_shutdown(self, restart):
 
 
-        if self.ansible_process is None:
-            logger.debug("No ansible process")
-            return
+        self.shutdown = False
+        self.shutdown_requested = True
 
-        try:
-            current_process = psutil.Process(self.ansible_process.pid)
-            children = current_process.children(recursive=True)
-            for child in children:
-                print('Child pid is {}'.format(child.pid))
-        except psutil.NoSuchProcess:
-            pass
+        while not self.shutdown:
+            logger.info("waiting for shutdown")
+            time.sleep(1)
+        logger.info("shutdown complete")
 
-        if self.is_ansible_alive():
-            logger.info('killing ansible {0}'.format(self.ansible_process.pid))
-            try:
-                self.ansible_process.kill()
-            except psutil.NoSuchProcess:
-                logger.info('process already dead {0}'.format(self.ansible_process.pid))
-            for child in children:
-                logger.info('killing ansible sub {0}'.format(child.pid))
-                try:
-                    child.kill()
-                except psutil.NoSuchProcess:
-                    logger.info('process already dead {0}'.format(child.pid))
+        self.shutdown_requested = False
+        self.runner_thread = None
+        self.runner = None
 
-        logger.info('stopping helper')
-        self.helper.stop()
-        self.helper = None
-        self.tasks_counter = 0
-
-        logger.info('clean up')
-        self.ansible_process = None
         return {'status': 'ok', 'restart': restart}
