@@ -5,9 +5,12 @@
 {% endblock header %}
 
 {% block input -%}
-{% if cell.source.strip().startswith("#inventory")%}
-{% elif cell.source.strip().startswith("#host_vars")%}
-{% elif cell.source.strip().startswith("#group_vars")%}
+{% if cell.source.strip().startswith("#inventory")-%}
+{% elif cell.source.strip().startswith("#ansible.cfg")-%}
+{% elif cell.source.strip().startswith("#template")-%}
+{% elif cell.source.strip().startswith("#vars")-%}
+{% elif cell.source.strip().startswith("#host_vars")-%}
+{% elif cell.source.strip().startswith("#group_vars")-%}
 {% elif cell.source.strip().startswith("#play") %}
 {% if cell.source.strip()[5:].strip() %}- {%endif%}{{cell.source.strip()[5:].strip() | indent(2) | trim}}
   tasks:

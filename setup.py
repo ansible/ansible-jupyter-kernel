@@ -55,7 +55,8 @@ setup(
     entry_points={
         "nbconvert.exporters" : [
             'ansible_tasks=ansible_kernel.exporters:AnsibleTasksExporter',
-            'ansible_playbook=ansible_kernel.exporters:AnsiblePlaybookExporter']
+            'ansible_playbook=ansible_kernel.exporters:AnsiblePlaybookExporter',
+            'ansible_zip=ansible_kernel.exporters:AnsibleZipExporter']
     },
     zip_safe=False
 )
