@@ -11,7 +11,7 @@ import traceback
 
 from functools import wraps
 
-DEBUG = True
+DEBUG = False
 
 
 def debug(fn):
