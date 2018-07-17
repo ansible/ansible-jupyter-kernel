@@ -17,6 +17,7 @@ import traceback
 import tempfile
 import six
 import pprint
+import shutil
 from six.moves import queue
 from collections import namedtuple
 
@@ -181,7 +182,6 @@ class AnsibleKernel(Kernel):
             else:
                 config.set('defaults', 'roles_path', os.path.abspath(
                     pkg_resources.resource_filename('ansible_kernel', 'roles')))
-            config.set('defaults', 'inventory', 'inventory')
             if not config.has_section('callback_ansible_kernel_helper'):
                 config.add_section('callback_ansible_kernel_helper')
             config.set('callback_ansible_kernel_helper',
@@ -336,7 +336,7 @@ class AnsibleKernel(Kernel):
 
     def do_inventory(self, code):
         logger.info("inventory set to %s", code)
-        with open(os.path.join(self.temp_dir, 'project', 'inventory'), 'w') as f:
+        with open(os.path.join(self.temp_dir, 'inventory'), 'w') as f:
             f.write("\n".join(code.splitlines()[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
@@ -439,6 +439,10 @@ class AnsibleKernel(Kernel):
 
     def start_ansible_playbook(self):
 
+        #We may need to purge artifacts when we start again
+        if os.path.exists(os.path.join(self.temp_dir, 'artifacts')):
+            shutil.rmtree(os.path.join(self.temp_dir, 'artifacts'))
+
         #command = ['ansible-playbook', 'playbook.yml']
         #logger.info("command %s", command)
         logger.info("runner starting")
@@ -446,34 +450,26 @@ class AnsibleKernel(Kernel):
         env['ANSIBLE_KERNEL_STATUS_PORT'] = str(self.helper.status_socket_port)
         self.runner_thread, self.runner = ansible_runner.run_async(private_data_dir=self.temp_dir,
                                                                    playbook="playbook.yml",
-                                                                   inventory="inventory",
                                                                    debug=True,
                                                                    ignore_logging=True,
                                                                    cancel_callback=self.cancel_callback,
                                                                    event_handler=self.runner_process_message)
         logger.info("runner started")
-        
-        #We may need to purge artifacts when we start again
-        #shutil.rmtree(os.path.join(self.temp_dir, 'artifacts'))
-
         logger.info("Runner status: {}".format(self.runner.status))
         while self.runner.status in ['unstarted', 'running', 'starting']:
             logger.info("In runner loop")
-            #has_messages = False
             try:
                 for event in self.runner.events:
                     logger.info(event)
                     self.runner_process_message(event)
-                    #self.process_message(event)
             except ansible_runner.exceptions.AnsibleRunnerException as e:
                 logger.info("Runner Exception: {}".format(e))
-            #if has_messages:
-            #    self.helper.pause_socket.send_string('Proceed')
 
             try:
+                logger.info("getting message %s", self.helper.pause_socket_port)
                 msg = self.queue.get(timeout=1)
             except queue.Empty:
-                logger.info("Empty!")
+                logger.info("Queue Empty!")
                 continue
             logger.info(msg)
             if isinstance(msg, StatusMessage):
@@ -491,31 +487,6 @@ class AnsibleKernel(Kernel):
             time.sleep(1)
         logger.info("Runner state is now {}".format(self.runner.status))
         self.clean_up_task_files()
-        # self.ansible_process = Popen(command,
-        #                              cwd=self.temp_dir,
-        #                              env=env,
-        #                              stdout=PIPE,
-        #                              stderr=STDOUT)
-
-        # while True:
-        #     logger.info("getting message %s", self.helper.pause_socket_port)
-        #     try:
-        #         if not self.is_ansible_alive():
-        #             logger.info("ansible is dead")
-        #             self.send_process_output()
-        #             self.do_shutdown(False)
-        #             break
-        #         msg = self.queue.get(timeout=1)
-        #     except queue.Empty:
-        #         logger.info("Empty!")
-        #         continue
-        #     logger.info(msg)
-        #     if isinstance(msg, StatusMessage):
-        #         if self.process_message(msg.message):
-        #             break
-        #     elif isinstance(msg, TaskCompletionMessage):
-        #         logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
-        #         break
 
         logger.info("done")
 
