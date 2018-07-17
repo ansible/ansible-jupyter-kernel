@@ -168,11 +168,6 @@ class AnsibleKernel(Kernel):
         with open(os.path.join(self.temp_dir, 'project', 'ansible.cfg'), 'w') as f:
             if not config.has_section('defaults'):
                 config.add_section('defaults')
-            #config.set('defaults', 'stdout_callback', 'null')
-            #config.set('defaults', 'callback_whitelist',
-            #           'ansible_kernel_helper')
-            #config.set('defaults', 'callback_plugins', os.path.abspath(
-            #    pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
             if config.has_option('defaults', 'roles_path'):
                 roles_path = config.get('defaults', 'roles_path')
                 roles_path = ":".join([os.path.abspath(x) for x in roles_path.split(":")])
@@ -204,7 +199,6 @@ class AnsibleKernel(Kernel):
         self.task_files = []
 
     def runner_process_message(self, data):
-        logger = logging.getLogger('ansible_kernel.kernel.runner_process_message')
         logger.info("runner message:\n{}".format(pprint.pformat(data)))
         if 'stdout' in data:
             stdout_actual = data['stdout']
@@ -215,9 +209,9 @@ class AnsibleKernel(Kernel):
                     return
                 if 'res' in data['event_data'] and 'stdout' in data['event_data']['res'] and data['event_data']['res']['stdout']:
                     stdout_actual = "{}\n{}".format(stdout_actual, data['event_data']['res']['stdout'])
-            stream_content = dict(name='stdout',
-                                  text="{}\n".format(stdout_actual))
-            self.send_response(self.iopub_socket, 'stream', stream_content)
+        stream_content = dict(name='stdout',
+                              text="{}\n".format(pprint.pformat(data)))
+        self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def process_message(self, message):
         logger.info("message %s", message)
@@ -438,7 +432,6 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def start_ansible_playbook(self):
-
         #We may need to purge artifacts when we start again
         if os.path.exists(os.path.join(self.temp_dir, 'artifacts')):
             shutil.rmtree(os.path.join(self.temp_dir, 'artifacts'))
@@ -453,6 +446,7 @@ class AnsibleKernel(Kernel):
                                                                    debug=True,
                                                                    ignore_logging=True,
                                                                    cancel_callback=self.cancel_callback,
+                                                                   finished_callback=self.finished_callback,
                                                                    event_handler=self.runner_process_message)
         logger.info("runner started")
         logger.info("Runner status: {}".format(self.runner.status))
@@ -492,7 +486,6 @@ class AnsibleKernel(Kernel):
 
 
     def do_execute_task(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
         if not self.is_ansible_alive():
             logger.info("ansible is dead")
             self.do_shutdown(False)
@@ -788,7 +781,6 @@ class AnsibleKernel(Kernel):
         return data
 
     def is_ansible_alive(self):
-        logger = logging.getLogger('ansible_kernel.kernel.is_ansible_alive')
         if self.runner_thread is None:
             logger.info("NOT STARTED")
             return False
@@ -799,10 +791,12 @@ class AnsibleKernel(Kernel):
         return self.runner_thread.is_alive()
 
     def cancel_callback(self):
-        logger = logging.getLogger('ansible_kernel.kernel.cancel_callback')
+        logger.info('called')
+        return self.shutdown_requested
+
+    def finished_callback(self, runner):
         logger.info('called')
         self.shutdown = True
-        return self.shutdown_requested
 
     def do_shutdown(self, restart):
 
@@ -812,6 +806,8 @@ class AnsibleKernel(Kernel):
             self.shutdown_requested = True
 
             while not self.shutdown:
+                if not self.is_ansible_alive():
+                    break
                 logger.info("waiting for shutdown")
                 time.sleep(1)
             logger.info("shutdown complete")
