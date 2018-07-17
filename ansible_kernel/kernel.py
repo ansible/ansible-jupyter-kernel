@@ -337,7 +337,7 @@ class AnsibleKernel(Kernel):
     def do_inventory(self, code):
         logger.info("inventory set to %s", code)
         with open(os.path.join(self.temp_dir, 'project', 'inventory'), 'w') as f:
-            f.write(code)
+            f.write("\n".join(code.splitlines()[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
@@ -446,6 +446,7 @@ class AnsibleKernel(Kernel):
         env['ANSIBLE_KERNEL_STATUS_PORT'] = str(self.helper.status_socket_port)
         self.runner_thread, self.runner = ansible_runner.run_async(private_data_dir=self.temp_dir,
                                                                    playbook="playbook.yml",
+                                                                   inventory="inventory",
                                                                    debug=True,
                                                                    ignore_logging=True,
                                                                    cancel_callback=self.cancel_callback,
@@ -481,6 +482,10 @@ class AnsibleKernel(Kernel):
             elif isinstance(msg, TaskCompletionMessage):
                 logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
                 break
+            elif not self.is_ansible_alive():
+                logger.info("ansible is dead")
+                self.do_shutdown(False)
+                break
 
             logger.info("Bottom of runner loop")
             time.sleep(1)
@@ -515,13 +520,11 @@ class AnsibleKernel(Kernel):
         logger.info("done")
 
 
-    def send_process_output(self):
-        output = self.ansible_process.communicate()[0].decode('utf-8')
-        logger.debug("process output %s", output)
-        stream_content = {'name': 'stdout', 'text': str(output)}
-        self.send_response(self.iopub_socket, 'stream', stream_content)
-
     def do_execute_task(self, code):
+        logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
+        if not self.is_ansible_alive():
+            logger.info("ansible is dead")
+            self.do_shutdown(False)
         if self.helper is None:
             output = "No play found. Run a valid play cell"
             stream_content = {'name': 'stdout', 'text': str(output)}
@@ -833,16 +836,20 @@ class AnsibleKernel(Kernel):
     def do_shutdown(self, restart):
 
 
-        self.shutdown = False
-        self.shutdown_requested = True
+        if self.is_ansible_alive():
+            self.shutdown = False
+            self.shutdown_requested = True
 
-        while not self.shutdown:
-            logger.info("waiting for shutdown")
-            time.sleep(1)
-        logger.info("shutdown complete")
+            while not self.shutdown:
+                logger.info("waiting for shutdown")
+                time.sleep(1)
+            logger.info("shutdown complete")
 
         self.shutdown_requested = False
         self.runner_thread = None
         self.runner = None
+        if self.helper is not None:
+            self.helper.stop()
+            self.helper = None
 
         return {'status': 'ok', 'restart': restart}
