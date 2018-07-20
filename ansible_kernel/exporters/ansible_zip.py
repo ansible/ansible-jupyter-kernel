@@ -28,7 +28,7 @@ class AnsibleZipExporter(Exporter):
 
         resources_copy = resources.copy()
 
-        contents = six.StringIO()
+        contents = six.BytesIO()
 
         playbook_exporter = AnsiblePlaybookExporter()
         playbook, _ = playbook_exporter.from_notebook_node(nb, resources_copy, **kw)
