@@ -9,6 +9,9 @@ from nbconvert.exporters.exporter import Exporter
 from .ansible_playbook import AnsiblePlaybookExporter
 
 
+DEFAULT_INVENTORY = '[all]\nlocalhost ansible_connection=local'
+
+
 class AnsibleZipExporter(Exporter):
     """
     Exports an Ansible Bundle file.
@@ -28,11 +31,11 @@ class AnsibleZipExporter(Exporter):
 
         resources_copy = resources.copy()
 
-        contents = six.StringIO()
+        contents = six.BytesIO()
 
         playbook_exporter = AnsiblePlaybookExporter()
         playbook, _ = playbook_exporter.from_notebook_node(nb, resources_copy, **kw)
-        inventory = None
+        inventory = DEFAULT_INVENTORY
         ansible_cfg = None
         templates = []
         vars_files = []
@@ -66,8 +69,9 @@ class AnsibleZipExporter(Exporter):
         zip_file = zipfile.ZipFile(contents, "a", zipfile.ZIP_DEFLATED, False)
         if ansible_cfg is not None:
             zip_file.writestr('ansible.cfg', ansible_cfg)
-        if inventory is not None:
-            zip_file.writestr('inventory', inventory)
+
+        zip_file.writestr('inventory', inventory)
+
         for template in templates:
             zip_file.writestr(*template)
         for vars_file in vars_files:
