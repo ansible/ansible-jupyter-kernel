@@ -1,0 +1,5 @@
+#!/bin/sh
+id
+whoami
+
+jupyter notebook --ip 0.0.0.0
