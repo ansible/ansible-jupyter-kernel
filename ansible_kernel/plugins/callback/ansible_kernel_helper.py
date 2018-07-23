@@ -6,11 +6,12 @@ from ansible.playbook.task_include import TaskInclude
 import json
 import zmq
 import os
+import traceback
 
 
 from functools import wraps
 
-DEBUG = True
+DEBUG = False
 
 
 def debug(fn):
@@ -18,7 +19,11 @@ def debug(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             print('Calling', fn)
-            ret_value = fn(*args, **kwargs)
+            try:
+                ret_value = fn(*args, **kwargs)
+            except Exception:
+                print (traceback.format_exc())
+                raise
             return ret_value
         return wrapper
     else:
@@ -50,12 +55,20 @@ class CallbackModule(CallbackBase):
 
     def _format_output(self, result):
         if 'stdout_lines' in result:
-            return '\n'.join(result['stdout_lines'])
+            if len(result['stdout_lines']) > 0:
+                if isinstance(result['stdout_lines'][0], list):
+                    return ("\n{}\n".format("-" * 80)).join(["\n".join(x) for x in result['stdout_lines']])
+                else:
+                    return '\n'.join(result['stdout_lines'])
         return ""
 
     def _format_error(self, result):
         if 'stderr_lines' in result:
-            return '\n'.join(result['stderr_lines'])
+            if len(result['stderr_lines']) > 0:
+                if isinstance(result['stderr_lines'][0], list):
+                    return ("\n{}\n".format("-" * 80)).join(["\n".join(x) for x in result['stderr_lines']])
+                else:
+                    return '\n'.join(result['stderr_lines'])
         return ""
 
     def _dump_results(self, result):
@@ -66,13 +79,13 @@ class CallbackModule(CallbackBase):
         if 'stdout' in r:
             if r['stdout']:
                 r['stdout'] = '[see below]'
-        if 'stdout_lines' in r:
+        if 'stdout' in and 'stdout_lines' in r:
             if r['stdout_lines']:
                 r['stdout_lines']  = '[removed for clarity]'
         if 'stderr' in r:
             if r['stderr']:
                 r['stderr'] = '[see below]'
-        if 'stderr_lines' in r:
+        if 'stderr' in r and 'stderr_lines' in r:
             if r['stderr_lines']:
                 r['stderr_lines']  = '[removed for clarity]'
         if 'changed' in r:

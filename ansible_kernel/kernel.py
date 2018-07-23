@@ -6,7 +6,6 @@ from subprocess import check_output
 import pkg_resources
 import atexit
 import os
-import io
 import re
 import yaml
 import threading
@@ -17,6 +16,7 @@ import traceback
 import tempfile
 import psutil
 import six
+import select
 from six.moves import queue
 from collections import namedtuple
 
@@ -79,12 +79,10 @@ class AnsibleKernelHelpersThread(object):
         logger.info('thread.stop end')
 
     def recv_status(self, msg):
-        logger = logging.getLogger('ansible_kernel.kernel.recv_status')
         logger.info(msg)
         self.queue.put(StatusMessage(json.loads(msg[0])))
 
     def recv_pause(self, msg):
-        logger = logging.getLogger('ansible_kernel.kernel.recv_pause')
         logger.info("completed %s waiting...", msg)
         self.queue.put(TaskCompletionMessage(json.loads(msg[0])))
 
@@ -127,7 +125,6 @@ class AnsibleKernel(Kernel):
 
     def __init__(self, **kwargs):
         Kernel.__init__(self, **kwargs)
-        logger = logging.getLogger('ansible_kernel.kernel.__init__')
         self.ansible_cfg = None
         self.ansible_process = None
         self.current_play = None
@@ -149,7 +146,6 @@ class AnsibleKernel(Kernel):
         self.do_execute_play(self.default_play)
 
     def start_helper(self):
-        logger = logging.getLogger('ansible_kernel.kernel.start_helper')
         self.helper = AnsibleKernelHelpersThread(self.queue)
         self.helper.start()
         logger.info("Started helper")
@@ -196,7 +192,6 @@ class AnsibleKernel(Kernel):
         self.task_files = []
 
     def process_message(self, message):
-        logger = logging.getLogger('ansible_kernel.kernel.process_message')
         logger.info("message %s", message)
 
         stop_processing = False
@@ -285,7 +280,6 @@ class AnsibleKernel(Kernel):
 
     def do_execute(self, code, silent, store_history=True,
                    user_expressions=None, allow_stdin=False):
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute')
         self.silent = silent
         if not code.strip():
             return {'status': 'ok', 'execution_count': self.execution_count,
@@ -313,7 +307,6 @@ class AnsibleKernel(Kernel):
             return self.do_execute_task(code)
 
     def do_inventory(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_inventory')
         logger.info("inventory set to %s", code)
         with open(os.path.join(self.temp_dir, 'inventory'), 'w') as f:
             f.write(code)
@@ -321,7 +314,6 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_ansible_cfg(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_ansible_cfg')
         self.ansible_cfg = str(code)
         config = configparser.SafeConfigParser()
         if self.ansible_cfg is not None:
@@ -331,7 +323,6 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_host_vars(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_host_vars')
         code_lines = code.strip().splitlines(True)
         host = code_lines[0][len('#host_vars'):].strip()
         logger.debug("host %s", host)
@@ -344,7 +335,6 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_vars(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_vars')
         code_lines = code.strip().splitlines(True)
         vars = code_lines[0][len('#vars'):].strip()
         logger.debug("vars %s", vars)
@@ -354,7 +344,6 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_template(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_template')
         code_lines = code.strip().splitlines(True)
         template = code_lines[0][len('#template'):].strip()
         logger.debug("template %s", template)
@@ -364,7 +353,6 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_group_vars(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_group_vars')
         code_lines = code.strip().splitlines(True)
         group = code_lines[0][len('#group_vars'):].strip()
         logger.debug("group %s", group)
@@ -377,7 +365,6 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_execute_play(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute_play')
         if self.is_ansible_alive():
             self.do_shutdown(False)
         self.start_helper()
@@ -416,12 +403,12 @@ class AnsibleKernel(Kernel):
         self.send_response(self.iopub_socket, 'stream', stream_content)
         # End weird work around
         self.start_ansible_playbook()
+        self.read_process_output()
         logger.info("done")
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
     def start_ansible_playbook(self):
-        logger = logging.getLogger('ansible_kernel.kernel.start_ansible_playbook')
 
         command = ['ansible-playbook', 'playbook.yml']
 
@@ -456,8 +443,23 @@ class AnsibleKernel(Kernel):
                 logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
                 break
 
+        self.read_process_output()
+
         logger.info("done")
 
+    def read_process_output(self):
+        done = False
+        outputs = []
+        while not done:
+            ready_list, _ , _ = select.select([self.ansible_process.stdout], [], [], 0)
+            if self.ansible_process.stdout in ready_list:
+                outputs.append(self.ansible_process.stdout.readline())
+            else:
+                done = True
+        output = "".join(outputs)
+        logger.debug("process output %s", output)
+        stream_content = {'name': 'stdout', 'text': str(output)}
+        self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def send_process_output(self):
         output = self.ansible_process.communicate()[0].decode('utf-8')
@@ -466,7 +468,6 @@ class AnsibleKernel(Kernel):
         self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def do_execute_task(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
         if self.helper is None:
             output = "No play found. Run a valid play cell"
             stream_content = {'name': 'stdout', 'text': str(output)}
@@ -553,6 +554,8 @@ class AnsibleKernel(Kernel):
         if interrupted:
             return {'status': 'abort', 'execution_count': self.execution_count}
 
+        self.read_process_output()
+
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
@@ -583,7 +586,6 @@ class AnsibleKernel(Kernel):
                    'cursor_end': cursor_pos, 'metadata': dict(),
                    'status': 'ok'}
 
-        logger = logging.getLogger('ansible_kernel.kernel.do_complete_task')
         logger.debug('code %r', code)
 
         if not code or code[-1] == ' ':
@@ -646,7 +648,6 @@ class AnsibleKernel(Kernel):
                    'cursor_end': cursor_pos, 'metadata': dict(),
                    'status': 'ok'}
 
-        logger = logging.getLogger('ansible_kernel.kernel.do_complete_task')
         logger.debug('code %r', code)
 
         if not code or code[-1] == ' ':
@@ -675,7 +676,6 @@ class AnsibleKernel(Kernel):
                 'status': 'ok'}
 
     def do_inspect(self, code, cursor_pos, detail_level=0):
-        logger = logging.getLogger('ansible_kernel.kernel.do_inspect')
         logger.debug("code %s", code)
         logger.debug("cursor_pos %s", cursor_pos)
         logger.debug("detail_level %s", detail_level)
@@ -692,7 +692,6 @@ class AnsibleKernel(Kernel):
             return self.do_inspect_module(code, cursor_pos, detail_level)
 
     def do_inspect_module(self, code, cursor_pos, detail_level=0):
-        logger = logging.getLogger('ansible_kernel.kernel.do_inspect_module')
 
         data = dict()
 
@@ -716,7 +715,6 @@ class AnsibleKernel(Kernel):
         return {'status': 'ok', 'data': data, 'metadata': {}, 'found': True}
 
     def get_galaxy_role(self, role_name):
-        logger = logging.getLogger('ansible_kernel.kernel.get_galaxy_role')
 
         command = ['ansible-galaxy', 'list', '-p', 'roles']
         logger.debug("command %s", command)
@@ -747,7 +745,6 @@ class AnsibleKernel(Kernel):
 
 
     def get_module_doc(self, module):
-        logger = logging.getLogger('ansible_kernel.kernel.get_module_doc')
 
         data = {}
 
@@ -770,9 +767,6 @@ class AnsibleKernel(Kernel):
         return self.ansible_process.poll() is None
 
     def do_shutdown(self, restart):
-
-        logger = logging.getLogger('ansible_kernel.kernel.do_shutdown')
-
         if self.ansible_process is None:
             logger.debug("No ansible process")
             return
