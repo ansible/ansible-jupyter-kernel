@@ -24,6 +24,9 @@ If applicable, add screenshots to help explain your problem.
  - OS: [e.g. iOS]
  - Browser [e.g. chrome, safari]
  - Version [e.g. 22]
+ - Jupyter Notebook Version
+ - Jupyter Lab Version (if used)
+ - Jupyter Hub Version (if used)
 
 **Smartphone (please complete the following information):**
  - Device: [e.g. iPhone6]
