@@ -28,7 +28,7 @@ COPY . ${HOME}
 USER root
 RUN chown -R ${NB_UID} ${HOME}
 
-RUN pip install --no-cache-dir ansible_kernel==0.6.0 && \
+RUN pip install --no-cache-dir ansible_kernel==0.7.0 && \
     python -m ansible_kernel.install
 USER ${NB_USER}
 WORKDIR /home/notebook/notebooks

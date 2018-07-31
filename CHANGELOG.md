@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.0] - 2018-07-31
+
+### Added
+
+- Inclusion of the default inventory in Ansible zip bundles
+
+### Fixes
+
+- Export of Ansible zip bundles in Python 3
+
 ## [0.6.0] - 2018-07-16
 
 ### Added
