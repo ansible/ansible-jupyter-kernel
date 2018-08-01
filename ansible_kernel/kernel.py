@@ -200,18 +200,80 @@ class AnsibleKernel(Kernel):
 
     def runner_process_message(self, data):
         logger.info("runner message:\n{}".format(pprint.pformat(data)))
-        if 'stdout' in data:
-            stdout_actual = data['stdout']
-            if 'event_data' in data and 'task' in data['event_data']:
-                if data['event_data']['task'] == 'pause_for_kernel':
-                    return
-                if data['event_data']['task'] == 'include_tasks':
-                    return
-                if 'res' in data['event_data'] and 'stdout' in data['event_data']['res'] and data['event_data']['res']['stdout']:
-                    stdout_actual = "{}\n{}".format(stdout_actual, data['event_data']['res']['stdout'])
-        stream_content = dict(name='stdout',
-                              text="{}\n".format(pprint.pformat(data)))
-        self.send_response(self.iopub_socket, 'stream', stream_content)
+        try:
+
+            event_data = data.get('event_data', {})
+            task = event_data.get('task')
+            event = data.get('event')
+
+            if event == 'playbook_on_start':
+                pass
+            elif event == 'playbook_on_play_start':
+                pass
+            elif event == 'playbook_on_stats':
+                pass
+            elif event == 'playbook_on_include':
+                pass
+            elif event == 'playbook_on_task_start':
+                logger.debug('playbook_on_task_start')
+                task_args = event_data.get('task_args', [])
+                task_uuid = data.get('uuid', '')
+                self.queue.put(StatusMessage(['TaskStart', dict(task_name=task,
+                                                                task_arg=task_args,
+                                                                task_id=task_uuid)]))
+            elif event == 'runner_on_ok':
+                logger.debug('runner_on_ok')
+                results = event_data.get('res', {})
+                device_name = event_data.get('host')
+                task_uuid = data.get('uuid', '')
+                self.queue.put(StatusMessage(['TaskStatus', dict(task_name=task,
+                                                                 device_name=device_name,
+                                                                 delegated_host_name=device_name,
+                                                                 changed=results.get('changed', False),
+                                                                 failed=False,
+                                                                 unreachable=False,
+                                                                 skipped=False,
+                                                                 results=self._dump_results(results),
+                                                                 output=self._format_output(results),
+                                                                 error=self._format_error(results),
+                                                                 task_id=task_uuid)]))
+
+            elif event == 'runner_on_failed':
+                device_name = event_data.get('host')
+                task_uuid = data.get('uuid', '')
+                results = event_data.get('res', {})
+                self.queue.put(StatusMessage(['TaskStatus', dict(task_name=task,
+                                                                 device_name=device_name,
+                                                                 changed=False,
+                                                                 failed=True,
+                                                                 unreachable=False,
+                                                                 skipped=False,
+                                                                 delegated_host_name=device_name,
+                                                                 results=self._dump_results(results),
+                                                                 output=self._format_output(results),
+                                                                 error=self._format_error(results),
+                                                                 task_id=task_uuid)]))
+
+            elif event == 'runner_on_unreachable':
+                device_name = event_data.get('host')
+                task_uuid = data.get('uuid', '')
+                self.queue.put(StatusMessage(['TaskStatus', dict(task_name=task,
+                                                                 device_name=device_name,
+                                                                 changed=False,
+                                                                 failed=False,
+                                                                 unreachable=True,
+                                                                 skipped=False,
+                                                                 task_id=task_uuid)]))
+            elif event == 'error':
+                self.queue.put(StatusMessage(['Error', dict(stdout=data.get('stdout', ''))]))
+            else:
+                stream_content = dict(name='stdout',
+                                      text="{}\n".format(pprint.pformat(data)))
+                self.send_response(self.iopub_socket, 'stream', stream_content)
+
+        except BaseException:
+            logger.error(traceback.format_exc())
+
 
     def process_message(self, message):
         logger.info("message %s", message)
@@ -283,6 +345,9 @@ class AnsibleKernel(Kernel):
                 output += "\n\n[%s] stderr:\n" % message_data['device_name']
                 output += message_data['error']
             output += "\n"
+        elif message_type == 'Error':
+            logger.debug('Error')
+            output = message_data.get('stdout')
         else:
             output = str(message)
 
@@ -797,6 +862,8 @@ class AnsibleKernel(Kernel):
     def finished_callback(self, runner):
         logger.info('called')
         self.shutdown = True
+        if not self.shutdown_requested:
+            self.queue.put(StatusMessage(['PlaybookEnded', {}]))
 
     def do_shutdown(self, restart):
 
@@ -820,3 +887,40 @@ class AnsibleKernel(Kernel):
             self.helper = None
 
         return {'status': 'ok', 'restart': restart}
+
+    def _format_output(self, result):
+        if 'stdout_lines' in result:
+            return '\n'.join(result['stdout_lines'])
+        return ""
+
+    def _format_error(self, result):
+        if 'stderr_lines' in result:
+            return '\n'.join(result['stderr_lines'])
+        return ""
+
+    def _dump_results(self, result):
+
+        r = result.copy()
+        for key in ['_ansible_verbose_always',
+                    '_ansible_no_log',
+                    '_ansible_parsed',
+                    'invocation']:
+            if key in r:
+                del r[key]
+        if 'stdout' in r:
+            if r['stdout']:
+                r['stdout'] = '[see below]'
+        if 'stdout_lines' in r:
+            if r['stdout_lines']:
+                r['stdout_lines']  = '[removed for clarity]'
+        if 'stderr' in r:
+            if r['stderr']:
+                r['stderr'] = '[see below]'
+        if 'stderr_lines' in r:
+            if r['stderr_lines']:
+                r['stderr_lines']  = '[removed for clarity]'
+        if 'changed' in r:
+            del r['changed']
+        if 'reason' in r:
+            return r['reason']
+        return json.dumps(r, sort_keys=True, indent=4)
