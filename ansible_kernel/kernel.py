@@ -5,8 +5,8 @@ from subprocess import check_output
 
 import pkg_resources
 import atexit
+import time
 import os
-import io
 import re
 import yaml
 import threading
@@ -124,6 +124,7 @@ class AnsibleKernel(Kernel):
     ]
 
     def __init__(self, **kwargs):
+        start_time = time.time()
         Kernel.__init__(self, **kwargs)
         self.ansible_cfg = None
         self.ansible_process = None
@@ -144,6 +145,7 @@ class AnsibleKernel(Kernel):
         os.mkdir(os.path.join(self.temp_dir, 'roles'))
         self.do_inventory(self.default_inventory)
         self.do_execute_play(self.default_play)
+        logger.info("Kernel init finished took %s", time.time() - start_time)
 
     def start_helper(self):
         self.helper = AnsibleKernelHelpersThread(self.queue)
