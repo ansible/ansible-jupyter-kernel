@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Use ansible-runner to manage ansible-playbook calls
+
 ## [0.7.0] - 2018-07-31
 
 ### Added
