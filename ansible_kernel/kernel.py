@@ -5,8 +5,8 @@ from subprocess import check_output
 
 import pkg_resources
 import atexit
+import time
 import os
-import io
 import re
 import yaml
 import threading
@@ -15,8 +15,9 @@ import logging
 import json
 import traceback
 import tempfile
-import psutil
 import six
+import pprint
+import shutil
 from six.moves import queue
 from collections import namedtuple
 
@@ -30,6 +31,9 @@ from .play_args import play_args
 
 from six.moves import configparser
 from zmq.eventloop.ioloop import IOLoop
+
+import ansible_runner
+
 
 StatusMessage = namedtuple('StatusMessage', ['message'])
 TaskCompletionMessage = namedtuple('TaskCompletionMessage', ['task_num'])
@@ -79,12 +83,10 @@ class AnsibleKernelHelpersThread(object):
         logger.info('thread.stop end')
 
     def recv_status(self, msg):
-        logger = logging.getLogger('ansible_kernel.kernel.recv_status')
         logger.info(msg)
         self.queue.put(StatusMessage(json.loads(msg[0])))
 
     def recv_pause(self, msg):
-        logger = logging.getLogger('ansible_kernel.kernel.recv_pause')
         logger.info("completed %s waiting...", msg)
         self.queue.put(TaskCompletionMessage(json.loads(msg[0])))
 
@@ -126,8 +128,8 @@ class AnsibleKernel(Kernel):
     ]
 
     def __init__(self, **kwargs):
+        start_time = time.time()
         Kernel.__init__(self, **kwargs)
-        logger = logging.getLogger('ansible_kernel.kernel.__init__')
         self.ansible_cfg = None
         self.ansible_process = None
         self.current_play = None
@@ -135,6 +137,10 @@ class AnsibleKernel(Kernel):
         self.task_files = []
         self.playbook_file = None
         self.silent = False
+        self.runner = None
+        self.runner_thread = None
+        self.shutdown_requested = False
+        self.shutdown = False
         self.default_inventory = "[all]\nlocalhost ansible_connection=local\n"
         self.default_play = yaml.dump(dict(hosts='localhost',
                                            name='default',
@@ -144,26 +150,24 @@ class AnsibleKernel(Kernel):
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
-        os.mkdir(os.path.join(self.temp_dir, 'roles'))
+        os.mkdir(os.path.join(self.temp_dir, 'project'))
+        os.mkdir(os.path.join(self.temp_dir, 'project', 'roles'))
         self.do_inventory(self.default_inventory)
         self.do_execute_play(self.default_play)
+        logger.info("Kernel init finished took %s", time.time() - start_time)
 
     def start_helper(self):
-        logger = logging.getLogger('ansible_kernel.kernel.start_helper')
         self.helper = AnsibleKernelHelpersThread(self.queue)
         self.helper.start()
         logger.info("Started helper")
         config = configparser.SafeConfigParser()
         if self.ansible_cfg is not None:
             config.readfp(six.StringIO(self.ansible_cfg))
-        with open(os.path.join(self.temp_dir, 'ansible.cfg'), 'w') as f:
+        if not os.path.exists(os.path.join(self.temp_dir, 'project')):
+            os.mkdir(os.path.join(self.temp_dir, 'project'))
+        with open(os.path.join(self.temp_dir, 'project', 'ansible.cfg'), 'w') as f:
             if not config.has_section('defaults'):
                 config.add_section('defaults')
-            config.set('defaults', 'stdout_callback', 'null')
-            config.set('defaults', 'callback_whitelist',
-                       'ansible_kernel_helper')
-            config.set('defaults', 'callback_plugins', os.path.abspath(
-                pkg_resources.resource_filename('ansible_kernel', 'plugins/callback')))
             if config.has_option('defaults', 'roles_path'):
                 roles_path = config.get('defaults', 'roles_path')
                 roles_path = ":".join([os.path.abspath(x) for x in roles_path.split(":")])
@@ -173,7 +177,6 @@ class AnsibleKernel(Kernel):
             else:
                 config.set('defaults', 'roles_path', os.path.abspath(
                     pkg_resources.resource_filename('ansible_kernel', 'roles')))
-            config.set('defaults', 'inventory', 'inventory')
             if not config.has_section('callback_ansible_kernel_helper'):
                 config.add_section('callback_ansible_kernel_helper')
             config.set('callback_ansible_kernel_helper',
@@ -195,8 +198,84 @@ class AnsibleKernel(Kernel):
                 os.unlink(task_file)
         self.task_files = []
 
+    def runner_process_message(self, data):
+        logger.info("runner message:\n{}".format(pprint.pformat(data)))
+        try:
+
+            event_data = data.get('event_data', {})
+            task = event_data.get('task')
+            event = data.get('event')
+
+            if event == 'playbook_on_start':
+                pass
+            elif event == 'playbook_on_play_start':
+                pass
+            elif event == 'playbook_on_stats':
+                pass
+            elif event == 'playbook_on_include':
+                pass
+            elif event == 'playbook_on_task_start':
+                logger.debug('playbook_on_task_start')
+                task_args = event_data.get('task_args', [])
+                task_uuid = data.get('uuid', '')
+                self.queue.put(StatusMessage(['TaskStart', dict(task_name=task,
+                                                                task_arg=task_args,
+                                                                task_id=task_uuid)]))
+            elif event == 'runner_on_ok':
+                logger.debug('runner_on_ok')
+                results = event_data.get('res', {})
+                device_name = event_data.get('host')
+                task_uuid = data.get('uuid', '')
+                self.queue.put(StatusMessage(['TaskStatus', dict(task_name=task,
+                                                                 device_name=device_name,
+                                                                 delegated_host_name=device_name,
+                                                                 changed=results.get('changed', False),
+                                                                 failed=False,
+                                                                 unreachable=False,
+                                                                 skipped=False,
+                                                                 output=self._format_output(results),
+                                                                 error=self._format_error(results),
+                                                                 results=self._dump_results(results),
+                                                                 task_id=task_uuid)]))
+
+            elif event == 'runner_on_failed':
+                device_name = event_data.get('host')
+                task_uuid = data.get('uuid', '')
+                results = event_data.get('res', {})
+                self.queue.put(StatusMessage(['TaskStatus', dict(task_name=task,
+                                                                 device_name=device_name,
+                                                                 changed=False,
+                                                                 failed=True,
+                                                                 unreachable=False,
+                                                                 skipped=False,
+                                                                 delegated_host_name=device_name,
+                                                                 output=self._format_output(results),
+                                                                 error=self._format_error(results),
+                                                                 results=self._dump_results(results),
+                                                                 task_id=task_uuid)]))
+
+            elif event == 'runner_on_unreachable':
+                device_name = event_data.get('host')
+                task_uuid = data.get('uuid', '')
+                self.queue.put(StatusMessage(['TaskStatus', dict(task_name=task,
+                                                                 device_name=device_name,
+                                                                 changed=False,
+                                                                 failed=False,
+                                                                 unreachable=True,
+                                                                 skipped=False,
+                                                                 task_id=task_uuid)]))
+            elif event == 'error':
+                self.queue.put(StatusMessage(['Error', dict(stdout=data.get('stdout', ''))]))
+            else:
+                stream_content = dict(name='stdout',
+                                      text="{}\n".format(pprint.pformat(data)))
+                self.send_response(self.iopub_socket, 'stream', stream_content)
+
+        except BaseException:
+            logger.error(traceback.format_exc())
+
+
     def process_message(self, message):
-        logger = logging.getLogger('ansible_kernel.kernel.process_message')
         logger.info("message %s", message)
 
         stop_processing = False
@@ -266,6 +345,9 @@ class AnsibleKernel(Kernel):
                 output += "\n\n[%s] stderr:\n" % message_data['device_name']
                 output += message_data['error']
             output += "\n"
+        elif message_type == 'Error':
+            logger.debug('Error')
+            output = message_data.get('stdout')
         else:
             output = str(message)
 
@@ -285,7 +367,6 @@ class AnsibleKernel(Kernel):
 
     def do_execute(self, code, silent, store_history=True,
                    user_expressions=None, allow_stdin=False):
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute')
         self.silent = silent
         if not code.strip():
             return {'status': 'ok', 'execution_count': self.execution_count,
@@ -313,15 +394,13 @@ class AnsibleKernel(Kernel):
             return self.do_execute_task(code)
 
     def do_inventory(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_inventory')
         logger.info("inventory set to %s", code)
         with open(os.path.join(self.temp_dir, 'inventory'), 'w') as f:
-            f.write(code)
+            f.write("\n".join(code.splitlines()[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
     def do_ansible_cfg(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_ansible_cfg')
         self.ansible_cfg = str(code)
         config = configparser.SafeConfigParser()
         if self.ansible_cfg is not None:
@@ -331,11 +410,10 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_host_vars(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_host_vars')
         code_lines = code.strip().splitlines(True)
         host = code_lines[0][len('#host_vars'):].strip()
         logger.debug("host %s", host)
-        host_vars = os.path.join(self.temp_dir, 'host_vars')
+        host_vars = os.path.join(self.temp_dir, 'project', 'host_vars')
         if not os.path.exists(host_vars):
             os.mkdir(host_vars)
         with open(os.path.join(host_vars, host), 'w') as f:
@@ -344,31 +422,28 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_vars(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_vars')
         code_lines = code.strip().splitlines(True)
         vars = code_lines[0][len('#vars'):].strip()
         logger.debug("vars %s", vars)
-        with open(os.path.join(self.temp_dir, vars), 'w') as f:
+        with open(os.path.join(self.temp_dir, 'project', vars), 'w') as f:
             f.write("".join(code_lines[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
     def do_template(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_template')
         code_lines = code.strip().splitlines(True)
         template = code_lines[0][len('#template'):].strip()
         logger.debug("template %s", template)
-        with open(os.path.join(self.temp_dir, template), 'w') as f:
+        with open(os.path.join(self.temp_dir, 'project', template), 'w') as f:
             f.write("".join(code_lines[1:]))
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
     def do_group_vars(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_group_vars')
         code_lines = code.strip().splitlines(True)
         group = code_lines[0][len('#group_vars'):].strip()
         logger.debug("group %s", group)
-        group_vars = os.path.join(self.temp_dir, 'group_vars')
+        group_vars = os.path.join(self.temp_dir, 'project', 'group_vars')
         if not os.path.exists(group_vars):
             os.mkdir(group_vars)
         with open(os.path.join(group_vars, group), 'w') as f:
@@ -377,7 +452,6 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_execute_play(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute_play')
         if self.is_ansible_alive():
             self.do_shutdown(False)
         self.start_helper()
@@ -407,7 +481,9 @@ class AnsibleKernel(Kernel):
 
         logger.debug(yaml.safe_dump(playbook, default_flow_style=False))
 
-        self.playbook_file = (os.path.join(self.temp_dir, 'playbook.yml'))
+        if not os.path.exists(os.path.join(self.temp_dir, 'project')):
+            os.mkdir(os.path.join(self.temp_dir, 'project'))
+        self.playbook_file = (os.path.join(self.temp_dir, 'project', 'playbook.yml'))
         with open(self.playbook_file, 'w') as f:
             f.write(yaml.safe_dump(playbook, default_flow_style=False))
 
@@ -421,32 +497,38 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def start_ansible_playbook(self):
-        logger = logging.getLogger('ansible_kernel.kernel.start_ansible_playbook')
+        #We may need to purge artifacts when we start again
+        if os.path.exists(os.path.join(self.temp_dir, 'artifacts')):
+            shutil.rmtree(os.path.join(self.temp_dir, 'artifacts'))
 
-        command = ['ansible-playbook', 'playbook.yml']
-
-        logger.info("command %s", command)
-
+        #command = ['ansible-playbook', 'playbook.yml']
+        #logger.info("command %s", command)
+        logger.info("runner starting")
         env = os.environ.copy()
         env['ANSIBLE_KERNEL_STATUS_PORT'] = str(self.helper.status_socket_port)
-
-        self.ansible_process = Popen(command,
-                                     cwd=self.temp_dir,
-                                     env=env,
-                                     stdout=PIPE,
-                                     stderr=STDOUT)
-
-        while True:
-            logger.info("getting message %s", self.helper.pause_socket_port)
+        self.runner_thread, self.runner = ansible_runner.run_async(private_data_dir=self.temp_dir,
+                                                                   playbook="playbook.yml",
+                                                                   debug=True,
+                                                                   ignore_logging=True,
+                                                                   cancel_callback=self.cancel_callback,
+                                                                   finished_callback=self.finished_callback,
+                                                                   event_handler=self.runner_process_message)
+        logger.info("runner started")
+        logger.info("Runner status: {}".format(self.runner.status))
+        while self.runner.status in ['unstarted', 'running', 'starting']:
+            logger.info("In runner loop")
             try:
-                if not self.is_ansible_alive():
-                    logger.info("ansible is dead")
-                    self.send_process_output()
-                    self.do_shutdown(False)
-                    break
+                for event in self.runner.events:
+                    logger.info(event)
+                    self.runner_process_message(event)
+            except ansible_runner.exceptions.AnsibleRunnerException as e:
+                logger.info("Runner Exception: {}".format(e))
+
+            try:
+                logger.info("getting message %s", self.helper.pause_socket_port)
                 msg = self.queue.get(timeout=1)
             except queue.Empty:
-                logger.info("Empty!")
+                logger.info("Queue Empty!")
                 continue
             logger.info(msg)
             if isinstance(msg, StatusMessage):
@@ -455,18 +537,23 @@ class AnsibleKernel(Kernel):
             elif isinstance(msg, TaskCompletionMessage):
                 logger.info('msg.task_num %s tasks_counter %s', msg.task_num, self.tasks_counter)
                 break
+            elif not self.is_ansible_alive():
+                logger.info("ansible is dead")
+                self.do_shutdown(False)
+                break
+
+            logger.info("Bottom of runner loop")
+            time.sleep(1)
+        logger.info("Runner state is now {}".format(self.runner.status))
+        self.clean_up_task_files()
 
         logger.info("done")
 
 
-    def send_process_output(self):
-        output = self.ansible_process.communicate()[0].decode('utf-8')
-        logger.debug("process output %s", output)
-        stream_content = {'name': 'stdout', 'text': str(output)}
-        self.send_response(self.iopub_socket, 'stream', stream_content)
-
     def do_execute_task(self, code):
-        logger = logging.getLogger('ansible_kernel.kernel.do_execute_task')
+        if not self.is_ansible_alive():
+            logger.info("ansible is dead")
+            self.do_shutdown(False)
         if self.helper is None:
             output = "No play found. Run a valid play cell"
             stream_content = {'name': 'stdout', 'text': str(output)}
@@ -526,7 +613,7 @@ class AnsibleKernel(Kernel):
 
             logger.debug(yaml.safe_dump(tasks, default_flow_style=False))
 
-            self.next_task_file = os.path.join(self.temp_dir,
+            self.next_task_file = os.path.join(self.temp_dir, 'project',
                                                'next_task{0}.yml'.format(self.tasks_counter))
             self.tasks_counter += 1
             self.task_files.append(self.next_task_file)
@@ -583,7 +670,6 @@ class AnsibleKernel(Kernel):
                    'cursor_end': cursor_pos, 'metadata': dict(),
                    'status': 'ok'}
 
-        logger = logging.getLogger('ansible_kernel.kernel.do_complete_task')
         logger.debug('code %r', code)
 
         if not code or code[-1] == ' ':
@@ -646,7 +732,6 @@ class AnsibleKernel(Kernel):
                    'cursor_end': cursor_pos, 'metadata': dict(),
                    'status': 'ok'}
 
-        logger = logging.getLogger('ansible_kernel.kernel.do_complete_task')
         logger.debug('code %r', code)
 
         if not code or code[-1] == ' ':
@@ -675,7 +760,6 @@ class AnsibleKernel(Kernel):
                 'status': 'ok'}
 
     def do_inspect(self, code, cursor_pos, detail_level=0):
-        logger = logging.getLogger('ansible_kernel.kernel.do_inspect')
         logger.debug("code %s", code)
         logger.debug("cursor_pos %s", cursor_pos)
         logger.debug("detail_level %s", detail_level)
@@ -692,7 +776,6 @@ class AnsibleKernel(Kernel):
             return self.do_inspect_module(code, cursor_pos, detail_level)
 
     def do_inspect_module(self, code, cursor_pos, detail_level=0):
-        logger = logging.getLogger('ansible_kernel.kernel.do_inspect_module')
 
         data = dict()
 
@@ -716,9 +799,8 @@ class AnsibleKernel(Kernel):
         return {'status': 'ok', 'data': data, 'metadata': {}, 'found': True}
 
     def get_galaxy_role(self, role_name):
-        logger = logging.getLogger('ansible_kernel.kernel.get_galaxy_role')
 
-        command = ['ansible-galaxy', 'list', '-p', 'roles']
+        command = ['ansible-galaxy', 'list', '-p', 'project/roles']
         logger.debug("command %s", command)
         p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT)
         p.wait()
@@ -734,7 +816,7 @@ class AnsibleKernel(Kernel):
                     return
 
         p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT, )
-        command = ['ansible-galaxy', 'install', '-p', 'roles', role_name]
+        command = ['ansible-galaxy', 'install', '-p', 'project/roles', role_name]
         logger.debug("command %s", command)
         p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT, )
         p.wait()
@@ -747,7 +829,6 @@ class AnsibleKernel(Kernel):
 
 
     def get_module_doc(self, module):
-        logger = logging.getLogger('ansible_kernel.kernel.get_module_doc')
 
         data = {}
 
@@ -765,44 +846,81 @@ class AnsibleKernel(Kernel):
         return data
 
     def is_ansible_alive(self):
-        if self.ansible_process is None:
+        if self.runner_thread is None:
+            logger.info("NOT STARTED")
             return False
-        return self.ansible_process.poll() is None
+        if self.runner_thread.is_alive():
+            logger.info("YES")
+        else:
+            logger.info("NO")
+        return self.runner_thread.is_alive()
+
+    def cancel_callback(self):
+        logger.info('called')
+        return self.shutdown_requested
+
+    def finished_callback(self, runner):
+        logger.info('called')
+        self.shutdown = True
+        if not self.shutdown_requested:
+            self.queue.put(StatusMessage(['PlaybookEnded', {}]))
 
     def do_shutdown(self, restart):
 
-        logger = logging.getLogger('ansible_kernel.kernel.do_shutdown')
-
-        if self.ansible_process is None:
-            logger.debug("No ansible process")
-            return
-
-        try:
-            current_process = psutil.Process(self.ansible_process.pid)
-            children = current_process.children(recursive=True)
-            for child in children:
-                print('Child pid is {}'.format(child.pid))
-        except psutil.NoSuchProcess:
-            pass
 
         if self.is_ansible_alive():
-            logger.info('killing ansible {0}'.format(self.ansible_process.pid))
-            try:
-                self.ansible_process.kill()
-            except psutil.NoSuchProcess:
-                logger.info('process already dead {0}'.format(self.ansible_process.pid))
-            for child in children:
-                logger.info('killing ansible sub {0}'.format(child.pid))
-                try:
-                    child.kill()
-                except psutil.NoSuchProcess:
-                    logger.info('process already dead {0}'.format(child.pid))
+            self.shutdown = False
+            self.shutdown_requested = True
 
-        logger.info('stopping helper')
-        self.helper.stop()
-        self.helper = None
-        self.tasks_counter = 0
+            while not self.shutdown:
+                if not self.is_ansible_alive():
+                    break
+                logger.info("waiting for shutdown")
+                time.sleep(1)
+            logger.info("shutdown complete")
 
-        logger.info('clean up')
-        self.ansible_process = None
+        self.shutdown_requested = False
+        self.runner_thread = None
+        self.runner = None
+        if self.helper is not None:
+            self.helper.stop()
+            self.helper = None
+
         return {'status': 'ok', 'restart': restart}
+
+    def _format_output(self, result):
+        if 'stdout_lines' in result:
+            return '\n'.join(result['stdout_lines'])
+        return ""
+
+    def _format_error(self, result):
+        if 'stderr_lines' in result:
+            return '\n'.join(result['stderr_lines'])
+        return ""
+
+    def _dump_results(self, result):
+
+        r = result
+        for key in ['_ansible_verbose_always',
+                    '_ansible_no_log',
+                    '_ansible_parsed',
+                    'invocation']:
+            if key in r:
+                del r[key]
+        if 'stdout' in r:
+            if r['stdout']:
+                r['stdout'] = '[see below]'
+        if 'stdout_lines' in r:
+            if r['stdout_lines']:
+                r['stdout_lines']  = '[removed for clarity]'
+        if 'stderr' in r:
+            if r['stderr']:
+                r['stderr'] = '[see below]'
+        if 'stderr_lines' in r:
+            if r['stderr_lines']:
+                r['stderr_lines']  = '[removed for clarity]'
+        if 'changed' in r:
+            del r['changed']
+        if 'reason' in r:
+            return r['reason']
+        return json.dumps(r, sort_keys=True, indent=4)
