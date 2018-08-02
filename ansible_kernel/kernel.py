@@ -233,9 +233,9 @@ class AnsibleKernel(Kernel):
                                                                  failed=False,
                                                                  unreachable=False,
                                                                  skipped=False,
-                                                                 results=self._dump_results(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
+                                                                 results=self._dump_results(results),
                                                                  task_id=task_uuid)]))
 
             elif event == 'runner_on_failed':
@@ -249,9 +249,9 @@ class AnsibleKernel(Kernel):
                                                                  unreachable=False,
                                                                  skipped=False,
                                                                  delegated_host_name=device_name,
-                                                                 results=self._dump_results(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
+                                                                 results=self._dump_results(results),
                                                                  task_id=task_uuid)]))
 
             elif event == 'runner_on_unreachable':
@@ -900,7 +900,7 @@ class AnsibleKernel(Kernel):
 
     def _dump_results(self, result):
 
-        r = result.copy()
+        r = result
         for key in ['_ansible_verbose_always',
                     '_ansible_no_log',
                     '_ansible_parsed',
