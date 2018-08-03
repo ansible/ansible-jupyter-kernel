@@ -1,7 +1,12 @@
 from __future__ import print_function
 from ipykernel.kernelbase import Kernel
+from ipykernel.comm import CommManager
+from ipykernel.zmqshell import ZMQInteractiveShell
 
 from subprocess import check_output
+
+from traitlets import Instance, Type
+
 
 import pkg_resources
 import atexit
@@ -32,6 +37,7 @@ from .play_args import play_args
 from six.moves import configparser
 from zmq.eventloop.ioloop import IOLoop
 
+
 import ansible_runner
 
 
@@ -48,6 +54,20 @@ logger = logging.getLogger('ansible_kernel.kernel')
 version_pat = re.compile(r'version (\d+(\.\d+)+)')
 
 DEBUG = False
+
+
+class NullShell(SingletonConfigurable):
+
+    extension_manager = Instance('IPython.core.extensions.ExtensionManager', allow_none=True)
+
+    def __init__(self):
+        self.configurables = [self]
+        self._showtraceback = None
+        self.events = EventManager(self, available_events)
+        self.extension_manager = ExtensionManager(shell=self, parent=self)
+
+
+InteractiveShellABC.register(NullShell)
 
 
 class AnsibleKernelHelpersThread(object):
@@ -100,6 +120,9 @@ class AnsibleKernelHelpersThread(object):
 
 
 class AnsibleKernel(Kernel):
+    shell = Instance('IPython.core.interactiveshell.InteractiveShellABC', allow_none=True)
+    shell_class = Type(ZMQInteractiveShell)
+
     implementation = 'ansible_kernel'
     implementation_version = __version__
 
@@ -132,6 +155,23 @@ class AnsibleKernel(Kernel):
     def __init__(self, **kwargs):
         start_time = time.time()
         Kernel.__init__(self, **kwargs)
+
+        # Initialize the InteractiveShell subclass
+        self.shell = self.shell_class.instance(parent=self,
+                                               profile_dir = self.profile_dir,
+                                               user_module = self.user_module,
+                                               user_ns     = self.user_ns,
+                                               kernel      = self)
+        self.shell.displayhook.session = self.session
+        self.shell.displayhook.pub_socket = self.iopub_socket
+        self.shell.displayhook.topic = self._topic('execute_result')
+        self.shell.display_pub.session = self.session
+        self.shell.display_pub.pub_socket = self.iopub_socket
+
+        self.comm_manager = CommManager(parent=self, kernel=self)
+
+        self.shell.configurables.append(self.comm_manager)
+
         self.ansible_cfg = None
         self.ansible_process = None
         self.current_play = None
@@ -409,6 +449,8 @@ class AnsibleKernel(Kernel):
             return self.do_execute_task(code)
         elif code.strip().startswith("#play"):
             return self.do_execute_play(code)
+        elif code.strip().startswith("#python"):
+            return self.do_execute_python(code)
         else:
             return self.do_execute_task(code)
 
@@ -475,7 +517,7 @@ class AnsibleKernel(Kernel):
             self.do_shutdown(False)
         self.start_helper()
         code_data = yaml.load(code)
-        logger.debug('code_data %r %s', code_data)
+        logger.debug('code_data %r', code_data)
         logger.debug('code_data type: %s', type(code_data))
         self.current_play = code
 
@@ -590,12 +632,13 @@ class AnsibleKernel(Kernel):
                 module = code_data.split()[-1]
             data = self.get_module_doc(module)
             payload = dict(
-                source='page',
-                data=data,
-                start=0)
+                source='',
+                data=data)
             logging.debug('payload %s', payload)
+            # content = {'name': 'stdout', 'text': str(payload)}
+            self.send_response(self.iopub_socket, 'display_data', payload)
             return {'status': 'ok', 'execution_count': self.execution_count,
-                    'payload': [payload], 'user_expressions': {}}
+                    'payload': [], 'user_expressions': {}}
         elif isinstance(code_data, list):
             code_data = code_data[0]
         elif isinstance(code_data, dict):
@@ -656,6 +699,27 @@ class AnsibleKernel(Kernel):
 
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
+
+    def do_execute_python(self, code):
+
+
+        code = "".join(code.splitlines(True)[1:])
+
+        reply_content = {}
+
+        res = self.shell.run_cell(code)
+
+        if res.success:
+            reply_content['status'] = 'ok'
+        else:
+            reply_content['status'] = 'error'
+
+        reply_content['execution_count'] = self.execution_count
+
+        reply_content['payload'] = self.shell.payload_manager.read_payload()
+        self.shell.payload_manager.clear_payload()
+
+        return reply_content
 
     def do_complete(self, code, cursor_pos):
         code = code[:cursor_pos]
@@ -938,3 +1002,7 @@ class AnsibleKernel(Kernel):
         if 'reason' in r:
             return r['reason']
         return json.dumps(r, sort_keys=True, indent=4)
+
+    def set_parent(self, ident, parent):
+        super(AnsibleKernel, self).set_parent(ident, parent)
+        self.shell.set_parent(parent)
