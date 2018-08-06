@@ -291,6 +291,7 @@ class AnsibleKernel(Kernel):
                                                                  failed=False,
                                                                  unreachable=False,
                                                                  skipped=False,
+                                                                 text_html=self._format_text_html(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
                                                                  full_results=json.dumps(results),
@@ -309,6 +310,7 @@ class AnsibleKernel(Kernel):
                                                                  unreachable=False,
                                                                  skipped=False,
                                                                  delegated_host_name=device_name,
+                                                                 text_html=self._format_text_html(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
                                                                  full_results=json.dumps(results),
@@ -413,6 +415,10 @@ class AnsibleKernel(Kernel):
             if message_data.get('error', None):
                 output += "\n\n[%s] stderr:\n" % message_data['device_name']
                 output += message_data['error']
+            if message_data.get('text_html', None):
+                self.send_response(self.iopub_socket, 'display_data', dict(source="",
+                                                                           data={"text/html": message_data.get('text_html')}))
+
             output += "\n"
         elif message_type == 'Error':
             logger.debug('Error')
@@ -979,6 +985,13 @@ class AnsibleKernel(Kernel):
             self.helper = None
 
         return {'status': 'ok', 'restart': restart}
+
+    def _format_text_html(self, result):
+        if 'text/html' in result:
+            ret_value = result['text/html']
+            del result['text/html']
+            return ret_value
+        return ""
 
     def _format_output(self, result):
         if 'stdout_lines' in result:
