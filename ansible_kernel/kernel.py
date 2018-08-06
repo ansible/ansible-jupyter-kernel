@@ -150,8 +150,12 @@ class AnsibleKernel(Kernel):
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
+        os.mkdir(os.path.join(self.temp_dir, 'env'))
         os.mkdir(os.path.join(self.temp_dir, 'project'))
         os.mkdir(os.path.join(self.temp_dir, 'project', 'roles'))
+        with open(os.path.join(self.temp_dir, 'env', 'settings'), 'w') as f:
+            f.write(json.dumps(dict(idle_timeout=0,
+                                    job_timeout=0)))
         self.do_inventory(self.default_inventory)
         self.do_execute_play(self.default_play)
         logger.info("Kernel init finished took %s", time.time() - start_time)
