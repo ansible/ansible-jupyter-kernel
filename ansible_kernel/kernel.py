@@ -47,6 +47,8 @@ logger = logging.getLogger('ansible_kernel.kernel')
 
 version_pat = re.compile(r'version (\d+(\.\d+)+)')
 
+DEBUG = False
+
 
 class AnsibleKernelHelpersThread(object):
 
@@ -208,7 +210,13 @@ class AnsibleKernel(Kernel):
 
             event_data = data.get('event_data', {})
             task = event_data.get('task')
+            role = event_data.get('role', None)
             event = data.get('event')
+
+            if DEBUG:
+                stream_content = dict(name='stdout',
+                                      text="{}\n".format(pprint.pformat(data)))
+                self.send_response(self.iopub_socket, 'stream', stream_content)
 
             if event == 'playbook_on_start':
                 pass
@@ -223,6 +231,7 @@ class AnsibleKernel(Kernel):
                 task_args = event_data.get('task_args', [])
                 task_uuid = data.get('uuid', '')
                 self.queue.put(StatusMessage(['TaskStart', dict(task_name=task,
+                                                                role_name=role,
                                                                 task_arg=task_args,
                                                                 task_id=task_uuid)]))
             elif event == 'runner_on_ok':
@@ -231,6 +240,7 @@ class AnsibleKernel(Kernel):
                 device_name = event_data.get('host')
                 task_uuid = data.get('uuid', '')
                 self.queue.put(StatusMessage(['TaskStatus', dict(task_name=task,
+                                                                 role_name=role,
                                                                  device_name=device_name,
                                                                  delegated_host_name=device_name,
                                                                  changed=results.get('changed', False),
@@ -247,6 +257,7 @@ class AnsibleKernel(Kernel):
                 task_uuid = data.get('uuid', '')
                 results = event_data.get('res', {})
                 self.queue.put(StatusMessage(['TaskStatus', dict(task_name=task,
+                                                                 role_name=role,
                                                                  device_name=device_name,
                                                                  changed=False,
                                                                  failed=True,
@@ -262,6 +273,7 @@ class AnsibleKernel(Kernel):
                 device_name = event_data.get('host')
                 task_uuid = data.get('uuid', '')
                 self.queue.put(StatusMessage(['TaskStatus', dict(task_name=task,
+                                                                 role_name=role,
                                                                  device_name=device_name,
                                                                  changed=False,
                                                                  failed=False,
@@ -274,6 +286,7 @@ class AnsibleKernel(Kernel):
                 stream_content = dict(name='stdout',
                                       text="{}\n".format(pprint.pformat(data)))
                 self.send_response(self.iopub_socket, 'stream', stream_content)
+
 
         except BaseException:
             logger.error(traceback.format_exc())
@@ -310,8 +323,10 @@ class AnsibleKernel(Kernel):
 
         if message_type == 'TaskStart':
             logger.debug('TaskStart')
-            output = 'TASK [%s] %s\n' % (
-                message_data['task_name'], '*' * (72 - len(message_data['task_name'])))
+            task_name = message_data['task_name']
+            if message_data.get('role_name'):
+                task_name = "%s : %s" % (message_data['role_name'], task_name)
+            output = 'TASK [%s] %s\n' % (task_name, '*' * (72 - len(task_name)))
         elif message_type == 'DeviceStatus':
             logger.debug('DeviceStatus')
             pass
@@ -521,12 +536,6 @@ class AnsibleKernel(Kernel):
         logger.info("Runner status: {}".format(self.runner.status))
         while self.runner.status in ['unstarted', 'running', 'starting']:
             logger.info("In runner loop")
-            try:
-                for event in self.runner.events:
-                    logger.info(event)
-                    self.runner_process_message(event)
-            except ansible_runner.exceptions.AnsibleRunnerException as e:
-                logger.info("Runner Exception: {}".format(e))
 
             try:
                 logger.info("getting message %s", self.helper.pause_socket_port)
@@ -596,7 +605,7 @@ class AnsibleKernel(Kernel):
         else:
             logger.error('code_data %s unsupported type', type(code_data))
 
-        if 'include_role' in code_data.keys():
+        if isinstance(code_data, dict) and 'include_role' in code_data.keys():
             role_name = code_data['include_role'].get('name', '')
             if '.' in role_name:
                 self.get_galaxy_role(role_name)
