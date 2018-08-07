@@ -536,12 +536,6 @@ class AnsibleKernel(Kernel):
         logger.info("Runner status: {}".format(self.runner.status))
         while self.runner.status in ['unstarted', 'running', 'starting']:
             logger.info("In runner loop")
-            try:
-                for event in self.runner.events:
-                    logger.info(event)
-                    self.runner_process_message(event)
-            except ansible_runner.exceptions.AnsibleRunnerException as e:
-                logger.info("Runner Exception: {}".format(e))
 
             try:
                 logger.info("getting message %s", self.helper.pause_socket_port)
