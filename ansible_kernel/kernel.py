@@ -527,6 +527,7 @@ class AnsibleKernel(Kernel):
         env['ANSIBLE_KERNEL_STATUS_PORT'] = str(self.helper.status_socket_port)
         self.runner_thread, self.runner = ansible_runner.run_async(private_data_dir=self.temp_dir,
                                                                    playbook="playbook.yml",
+                                                                   quiet=True,
                                                                    debug=True,
                                                                    ignore_logging=True,
                                                                    cancel_callback=self.cancel_callback,
