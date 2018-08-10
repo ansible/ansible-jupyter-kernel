@@ -180,6 +180,7 @@ class AnsibleKernel(Kernel):
         self.current_play = None
         self.next_task_file = None
         self.task_files = []
+        self.registered_variable = None
         self.playbook_file = None
         self.silent = False
         self.runner = None
@@ -242,8 +243,10 @@ class AnsibleKernel(Kernel):
         with open(self.playbook_file, 'w') as f:
             f.write(yaml.safe_dump(playbook, default_flow_style=False))
 
-    def clean_up_task_files(self):
+    def clean_up_task_files(self, backup=False):
         for task_file in self.task_files:
+            if backup:
+                shutil.copy(task_file, task_file + ".bak")
             if os.path.exists(task_file):
                 os.unlink(task_file)
         self.task_files = []
@@ -291,6 +294,7 @@ class AnsibleKernel(Kernel):
                                                                  failed=False,
                                                                  unreachable=False,
                                                                  skipped=False,
+                                                                 application_python=self._format_application_python(results),
                                                                  text_html=self._format_text_html(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
@@ -310,6 +314,7 @@ class AnsibleKernel(Kernel):
                                                                  unreachable=False,
                                                                  skipped=False,
                                                                  delegated_host_name=device_name,
+                                                                 application_python=self._format_application_python(results),
                                                                  text_html=self._format_text_html(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
@@ -354,6 +359,8 @@ class AnsibleKernel(Kernel):
         if message_data.get('task_name', '') == 'pause_for_kernel':
             logger.debug('pause_for_kernel')
             return stop_processing
+        if message_data.get('task_name', '') == 'include_variables':
+            return stop_processing
         if message_data.get('task_name', '') == 'include_tasks':
             logger.debug('include_tasks')
             if message_type == 'TaskStatus' and message_data.get('failed', False):
@@ -382,7 +389,7 @@ class AnsibleKernel(Kernel):
             logger.debug('PlaybookEnded')
             output = "\nPlaybook ended\nContext lost!\n"
             self.do_shutdown(False)
-            self.clean_up_task_files()
+            self.clean_up_task_files(True)
             self.start_helper()
             self.rewrite_ports()
             self.start_ansible_playbook()
@@ -415,6 +422,8 @@ class AnsibleKernel(Kernel):
             if message_data.get('error', None):
                 output += "\n\n[%s] stderr:\n" % message_data['device_name']
                 output += message_data['error']
+            if message_data.get('application_python', None):
+                self.shell.run_cell(message_data.get('application_python'))
             if message_data.get('text_html', None):
                 self.send_response(self.iopub_socket, 'display_data', dict(source="",
                                                                            data={"text/html": message_data.get('text_html')}))
@@ -985,6 +994,13 @@ class AnsibleKernel(Kernel):
             self.helper = None
 
         return {'status': 'ok', 'restart': restart}
+
+    def _format_application_python(self, result):
+        if 'application/x-python' in result:
+            ret_value = result['application/x-python']
+            del result['application/x-python']
+            return ret_value
+        return ""
 
     def _format_text_html(self, result):
         if 'text/html' in result:
