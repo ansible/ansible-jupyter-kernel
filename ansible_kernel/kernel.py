@@ -23,8 +23,9 @@ import tempfile
 import six
 import pprint
 import shutil
+from pprint import pformat
 from six.moves import queue
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 import zmq
 from zmq.eventloop.zmqstream import ZMQStream
@@ -56,18 +57,16 @@ version_pat = re.compile(r'version (\d+(\.\d+)+)')
 DEBUG = False
 
 
-class NullShell(SingletonConfigurable):
+class Splitter(object):
 
-    extension_manager = Instance('IPython.core.extensions.ExtensionManager', allow_none=True)
+    def __init__(self, channels):
+        self.channels = channels
 
-    def __init__(self):
-        self.configurables = [self]
-        self._showtraceback = None
-        self.events = EventManager(self, available_events)
-        self.extension_manager = ExtensionManager(shell=self, parent=self)
-
-
-InteractiveShellABC.register(NullShell)
+    def send_multipart(self, msg, *args, **kwargs):
+        logger.debug('send_multipart %s %s %s', msg, args, kwargs)
+        for channel in self.channels:
+            result = channel.send_multipart(msg, *args, **kwargs)
+            logger.debug('result %s', result)
 
 
 class AnsibleKernelHelpersThread(object):
@@ -120,6 +119,7 @@ class AnsibleKernelHelpersThread(object):
 
 
 class AnsibleKernel(Kernel):
+
     shell = Instance('IPython.core.interactiveshell.InteractiveShellABC', allow_none=True)
     shell_class = Type(ZMQInteractiveShell)
 
@@ -159,12 +159,14 @@ class AnsibleKernel(Kernel):
         logger.debug("session %s %s", type(self.session), self.session)
         logger.debug("iopub_socket %s %s", type(self.iopub_socket), self.iopub_socket)
 
-        # Initialize the InteractiveShell subclass
+        self.original_iopub_socket = self.iopub_socket
+
+        self.iopub_socket = Splitter([self.original_iopub_socket, self])
+
         self.shell = self.shell_class.instance(parent=self,
-                                               profile_dir = self.profile_dir,
-                                               user_module = self.user_module,
-                                               user_ns     = self.user_ns,
-                                               kernel      = self)
+                                               profile_dir=self.profile_dir,
+                                               user_ns=self.user_ns,
+                                               kernel=self)
         self.shell.displayhook.session = self.session
         self.shell.displayhook.pub_socket = self.iopub_socket
         self.shell.displayhook.topic = self._topic('execute_result')
@@ -174,6 +176,10 @@ class AnsibleKernel(Kernel):
         self.comm_manager = CommManager(parent=self, kernel=self)
 
         self.shell.configurables.append(self.comm_manager)
+
+        self.shell_handlers['comm_open'] = self.comm_open
+        self.shell_handlers['comm_msg'] = self.comm_msg
+        self.shell_handlers['comm_close'] = self.comm_close
 
         self.ansible_cfg = None
         self.ansible_process = None
@@ -187,6 +193,9 @@ class AnsibleKernel(Kernel):
         self.runner_thread = None
         self.shutdown_requested = False
         self.shutdown = False
+        self.widgets = defaultdict(dict)
+        self.widget_update_order = 0
+
         self.default_inventory = "[all]\nlocalhost ansible_connection=local\n"
         self.default_play = yaml.dump(dict(hosts='localhost',
                                            name='default',
@@ -361,6 +370,8 @@ class AnsibleKernel(Kernel):
             return stop_processing
         if message_data.get('task_name', '') == 'include_variables':
             return stop_processing
+        if message_data.get('task_name', '') == 'include_vars':
+            return stop_processing
         if message_data.get('task_name', '') == 'include_tasks':
             logger.debug('include_tasks')
             if message_type == 'TaskStatus' and message_data.get('failed', False):
@@ -458,26 +469,36 @@ class AnsibleKernel(Kernel):
 
         logger.debug('code %r', code)
 
-        if code.strip().startswith("#inventory"):
-            return self.do_inventory(code)
-        elif code.strip().startswith("#ansible.cfg"):
-            return self.do_ansible_cfg(code)
-        elif code.strip().startswith("#host_vars"):
-            return self.do_host_vars(code)
-        elif code.strip().startswith("#group_vars"):
-            return self.do_group_vars(code)
-        elif code.strip().startswith("#vars"):
-            return self.do_vars(code)
-        elif code.strip().startswith("#template"):
-            return self.do_template(code)
-        elif code.strip().startswith("#task"):
-            return self.do_execute_task(code)
-        elif code.strip().startswith("#play"):
-            return self.do_execute_play(code)
-        elif code.strip().startswith("#python"):
-            return self.do_execute_python(code)
-        else:
-            return self.do_execute_task(code)
+        try:
+
+            if code.strip().startswith("#inventory"):
+                return self.do_inventory(code)
+            elif code.strip().startswith("#ansible.cfg"):
+                return self.do_ansible_cfg(code)
+            elif code.strip().startswith("#host_vars"):
+                return self.do_host_vars(code)
+            elif code.strip().startswith("#group_vars"):
+                return self.do_group_vars(code)
+            elif code.strip().startswith("#vars"):
+                return self.do_vars(code)
+            elif code.strip().startswith("#template"):
+                return self.do_template(code)
+            elif code.strip().startswith("#task"):
+                return self.do_execute_task(code)
+            elif code.strip().startswith("#play"):
+                return self.do_execute_play(code)
+            elif code.strip().startswith("#python"):
+                return self.do_execute_python(code)
+            else:
+                return self.do_execute_task(code)
+
+        except BaseException as e:
+            logger.error(traceback.format_exc())
+            reply = {'status': 'error', 'execution_count': self.execution_count,
+                     'payload': [], 'user_expressions': {}, 'traceback': traceback.format_exc().splitlines(), 'ename': type(e).__name__, 'evalue': str(e)}
+            self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error')) 
+            return reply
+
 
     def do_inventory(self, code):
         logger.info("inventory set to %s", code)
@@ -562,6 +583,10 @@ class AnsibleKernel(Kernel):
         tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                            'port': self.helper.pause_socket_port,
                                            'task_num': self.tasks_counter - 1}})
+        widget_vars_file = os.path.join(self.temp_dir, 'project', 'widget_vars.yml')
+        with open(widget_vars_file, 'w') as f:
+            f.write(yaml.dump({}))
+        tasks.append({'include_vars': {'file': 'widget_vars.yml'}})
         tasks.append(
             {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
 
@@ -675,7 +700,22 @@ class AnsibleKernel(Kernel):
         else:
             logger.error('code_data %s unsupported type', type(code_data))
 
-        if isinstance(code_data, dict) and 'include_role' in code_data.keys():
+        if not isinstance(code_data, dict):
+            try:
+                code_data = yaml.load(code)
+                tb = []
+            except Exception:
+                tb = traceback.format_exc(1).splitlines()
+            reply = {'status': 'error', 'execution_count': self.execution_count,
+                     'payload': [], 'user_expressions': {},
+                     'traceback': ['Invalid task cell\n'] + tb,
+                     'ename': 'Invalid cell',
+                     'evalue': ''}
+            self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error'))
+            return reply
+
+
+        if 'include_role' in code_data.keys():
             role_name = code_data['include_role'].get('name', '')
             if '.' in role_name:
                 self.get_galaxy_role(role_name)
@@ -694,6 +734,17 @@ class AnsibleKernel(Kernel):
             tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                                'port': self.helper.pause_socket_port,
                                                'task_num': self.tasks_counter}})
+
+            widget_vars_file = os.path.join(self.temp_dir, 'project', 'widget_vars.yml')
+            logger.debug("widget_vars_file %s", widget_vars_file)
+            with open(widget_vars_file, 'w') as f:
+                widget_vars = {}
+                for widget in sorted(self.widgets.values(), key=lambda x: x['widget_update_order']):
+                    logger.debug("widget %s", pformat(widget))
+                    if 'var_name' in widget and 'value' in widget:
+                        widget_vars[widget['var_name']] = widget['value']
+                f.write(yaml.safe_dump(widget_vars, default_flow_style=False))
+            tasks.append({'include_vars': {'file': 'widget_vars.yml'}})
             tasks.append(
                 {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter + 1)})
 
@@ -1049,3 +1100,52 @@ class AnsibleKernel(Kernel):
     def set_parent(self, ident, parent):
         super(AnsibleKernel, self).set_parent(ident, parent)
         self.shell.set_parent(parent)
+
+    def send_multipart(self, msg, *args, **kwargs):
+        logger.debug('send_multipart %s %s %s %s', len(msg), msg, args, kwargs)
+        if len(msg) == 7:
+            msg0, msg1, msg2, msg3, msg4, msg5, msg6 = msg
+            logger.debug("msg0 %s", msg0)
+            logger.debug("msg1 %s", msg1)
+            logger.debug("msg2 %s", msg2)
+            logger.debug("msg3 %s", pformat(json.loads(msg3)))
+            logger.debug("msg4 %s", pformat(json.loads(msg4)))
+            logger.debug("msg5 %s", pformat(json.loads(msg5)))
+            logger.debug("msg6 %s", pformat(json.loads(msg6)))
+            
+            msg3_data = json.loads(msg3)
+            msg6_data = json.loads(msg6)
+
+            if msg0.startswith("comm"):
+                _, _, comm_id = msg0.partition('-')
+                if msg3_data['msg_type'] == 'comm_open' and msg6_data['comm_id'] == comm_id:
+                    self.update_widget(comm_id, msg6_data.get('data', {}).get('state', {}))
+                    logger.debug("new widget %s %s", comm_id, pformat(self.widgets[comm_id]))
+
+                if msg3_data['msg_type'] == 'comm_msg' and msg6_data['comm_id'] == comm_id:
+                    if msg6_data.get('data', {}).get('method') == 'update':
+                        self.update_widget(comm_id, msg6_data.get('data', {}).get('state', {}))
+                        logger.debug("update widget %s %s", comm_id, pformat(self.widgets[comm_id]))
+
+    def update_widget(self, comm_id, state):
+        self.widgets[comm_id].update(state)
+        self.widgets[comm_id]['widget_update_order'] = self.widget_update_order
+        self.widget_update_order += 1
+
+    def comm_open(self, stream, ident, msg):
+        logger.debug("comm_open: %s %s", ident, msg)
+        self.comm_manager.comm_open(stream, ident, msg)
+
+    def comm_msg(self, stream, ident, msg):
+        logger.debug("comm_msg: %s %s", ident, msg)
+        logger.debug("msg %s", pformat(msg))
+
+        comm_id = msg.get('content', {}).get('comm_id', {})
+        if comm_id in self.widgets:
+            self.widgets[comm_id].update(msg.get('content', {}).get('data', {}).get('state', {}))
+            logger.debug("updated widget %s %s", comm_id, self.widgets[comm_id])
+        self.comm_manager.comm_msg(stream, ident, msg)
+
+    def comm_close(self, stream, ident, msg):
+        logger.debug("comm_close: %s %s", ident, msg)
+        self.comm_manager.comm_close(stream, ident, msg)
