@@ -156,6 +156,9 @@ class AnsibleKernel(Kernel):
         start_time = time.time()
         Kernel.__init__(self, **kwargs)
 
+        logger.debug("session %s %s", type(self.session), self.session)
+        logger.debug("iopub_socket %s %s", type(self.iopub_socket), self.iopub_socket)
+
         # Initialize the InteractiveShell subclass
         self.shell = self.shell_class.instance(parent=self,
                                                profile_dir = self.profile_dir,
@@ -199,6 +202,7 @@ class AnsibleKernel(Kernel):
             f.write(json.dumps(dict(idle_timeout=0,
                                     job_timeout=0)))
         self.do_inventory(self.default_inventory)
+        self.shell.run_code("import json")
         self.do_execute_play(self.default_play)
         logger.info("Kernel init finished took %s", time.time() - start_time)
 
@@ -289,6 +293,7 @@ class AnsibleKernel(Kernel):
                                                                  skipped=False,
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
+                                                                 full_results=json.dumps(results),
                                                                  results=self._dump_results(results),
                                                                  task_id=task_uuid)]))
 
@@ -306,6 +311,7 @@ class AnsibleKernel(Kernel):
                                                                  delegated_host_name=device_name,
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
+                                                                 full_results=json.dumps(results),
                                                                  results=self._dump_results(results),
                                                                  task_id=task_uuid)]))
 
@@ -393,6 +399,10 @@ class AnsibleKernel(Kernel):
             else:
                 logger.debug('ok')
                 output = 'ok: [%s]' % message_data['device_name']
+
+            if message_data.get('full_results', None) and self.registered_variable is not None:
+                self.shell.run_cell("{0} = json.loads('{1}')".format(self.registered_variable,
+                                                                     message_data.get('full_results')))
 
             if message_data.get('results', None):
                 output += " => "
@@ -617,6 +627,7 @@ class AnsibleKernel(Kernel):
             return {'status': 'ok', 'execution_count': self.execution_count,
                     'payload': [], 'user_expressions': {}}
 
+        self.registered_variable = None
         self.current_task = code
         try:
             code_data = yaml.load(code)
@@ -653,6 +664,9 @@ class AnsibleKernel(Kernel):
             role_name = code_data['include_role'].get('name', '')
             if '.' in role_name:
                 self.get_galaxy_role(role_name)
+
+        if 'register' in code_data.keys():
+            self.registered_variable = code_data['register']
 
         interrupted = False
         try:
