@@ -1,7 +1,12 @@
 from __future__ import print_function
 from ipykernel.kernelbase import Kernel
+from ipykernel.comm import CommManager
+from ipykernel.zmqshell import ZMQInteractiveShell
 
 from subprocess import check_output
+
+from traitlets import Instance, Type
+
 
 import pkg_resources
 import atexit
@@ -18,8 +23,9 @@ import tempfile
 import six
 import pprint
 import shutil
+from pprint import pformat
 from six.moves import queue
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 import zmq
 from zmq.eventloop.zmqstream import ZMQStream
@@ -31,6 +37,7 @@ from .play_args import play_args
 
 from six.moves import configparser
 from zmq.eventloop.ioloop import IOLoop
+
 
 import ansible_runner
 
@@ -48,6 +55,18 @@ logger = logging.getLogger('ansible_kernel.kernel')
 version_pat = re.compile(r'version (\d+(\.\d+)+)')
 
 DEBUG = False
+
+
+class Splitter(object):
+
+    def __init__(self, channels):
+        self.channels = channels
+
+    def send_multipart(self, msg, *args, **kwargs):
+        logger.debug('send_multipart %s %s %s', msg, args, kwargs)
+        for channel in self.channels:
+            result = channel.send_multipart(msg, *args, **kwargs)
+            logger.debug('result %s', result)
 
 
 class AnsibleKernelHelpersThread(object):
@@ -100,6 +119,10 @@ class AnsibleKernelHelpersThread(object):
 
 
 class AnsibleKernel(Kernel):
+
+    shell = Instance('IPython.core.interactiveshell.InteractiveShellABC', allow_none=True)
+    shell_class = Type(ZMQInteractiveShell)
+
     implementation = 'ansible_kernel'
     implementation_version = __version__
 
@@ -132,23 +155,54 @@ class AnsibleKernel(Kernel):
     def __init__(self, **kwargs):
         start_time = time.time()
         Kernel.__init__(self, **kwargs)
+
+        logger.debug("session %s %s", type(self.session), self.session)
+        logger.debug("iopub_socket %s %s", type(self.iopub_socket), self.iopub_socket)
+
+        self.original_iopub_socket = self.iopub_socket
+
+        self.iopub_socket = Splitter([self.original_iopub_socket, self])
+
+        self.shell = self.shell_class.instance(parent=self,
+                                               profile_dir=self.profile_dir,
+                                               user_ns=self.user_ns,
+                                               kernel=self)
+        self.shell.displayhook.session = self.session
+        self.shell.displayhook.pub_socket = self.iopub_socket
+        self.shell.displayhook.topic = self._topic('execute_result')
+        self.shell.display_pub.session = self.session
+        self.shell.display_pub.pub_socket = self.iopub_socket
+
+        self.comm_manager = CommManager(parent=self, kernel=self)
+
+        self.shell.configurables.append(self.comm_manager)
+
+        self.shell_handlers['comm_open'] = self.comm_open
+        self.shell_handlers['comm_msg'] = self.comm_msg
+        self.shell_handlers['comm_close'] = self.comm_close
+
         self.ansible_cfg = None
         self.ansible_process = None
         self.current_play = None
         self.next_task_file = None
         self.task_files = []
+        self.registered_variable = None
         self.playbook_file = None
         self.silent = False
         self.runner = None
         self.runner_thread = None
         self.shutdown_requested = False
         self.shutdown = False
+        self.widgets = defaultdict(dict)
+        self.widget_update_order = 0
+        self.vault_password = None
+
         self.default_inventory = "[all]\nlocalhost ansible_connection=local\n"
         self.default_play = yaml.dump(dict(hosts='localhost',
                                            name='default',
                                            gather_facts=False))
         self.temp_dir = tempfile.mkdtemp(prefix="ansible_kernel_playbook")
-        self.queue = queue.Queue()
+        self.queue = None
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
@@ -159,36 +213,46 @@ class AnsibleKernel(Kernel):
             f.write(json.dumps(dict(idle_timeout=0,
                                     job_timeout=0)))
         self.do_inventory(self.default_inventory)
+        self.shell.run_code("import json")
         self.do_execute_play(self.default_play)
         logger.info("Kernel init finished took %s", time.time() - start_time)
 
     def start_helper(self):
+        self.queue = queue.Queue()
         self.helper = AnsibleKernelHelpersThread(self.queue)
         self.helper.start()
+        self.process_widgets()
         logger.info("Started helper")
         config = configparser.SafeConfigParser()
         if self.ansible_cfg is not None:
             config.readfp(six.StringIO(self.ansible_cfg))
         if not os.path.exists(os.path.join(self.temp_dir, 'project')):
             os.mkdir(os.path.join(self.temp_dir, 'project'))
+
+        if not config.has_section('defaults'):
+            config.add_section('defaults')
+        if config.has_option('defaults', 'roles_path'):
+            roles_path = config.get('defaults', 'roles_path')
+            roles_path = ":".join([os.path.abspath(x) for x in roles_path.split(":")])
+            roles_path = "{0}:{1}".format(roles_path,
+                                          os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'roles')))
+            config.set('defaults', 'roles_path', roles_path)
+        else:
+            config.set('defaults', 'roles_path', os.path.abspath(
+                pkg_resources.resource_filename('ansible_kernel', 'roles')))
+        logger.debug("vault_password? %s", self.vault_password and not config.has_option('defaults', 'vault_password_file'))
+        if self.vault_password and not config.has_option('defaults', 'vault_password_file'):
+            vault_password_file = os.path.join(self.temp_dir, 'project', 'vault-secret')
+            with open(vault_password_file, 'w') as vpf:
+                vpf.write(self.vault_password)
+            config.set('defaults', 'vault_password_file', vault_password_file)
+        if not config.has_section('callback_ansible_kernel_helper'):
+            config.add_section('callback_ansible_kernel_helper')
+        config.set('callback_ansible_kernel_helper',
+                   'status_port', str(self.helper.status_socket_port))
         with open(os.path.join(self.temp_dir, 'project', 'ansible.cfg'), 'w') as f:
-            if not config.has_section('defaults'):
-                config.add_section('defaults')
-            if config.has_option('defaults', 'roles_path'):
-                roles_path = config.get('defaults', 'roles_path')
-                roles_path = ":".join([os.path.abspath(x) for x in roles_path.split(":")])
-                roles_path = "{0}:{1}".format(roles_path,
-                                              os.path.abspath(pkg_resources.resource_filename('ansible_kernel', 'roles')))
-                config.set('defaults', 'roles_path', roles_path)
-            else:
-                config.set('defaults', 'roles_path', os.path.abspath(
-                    pkg_resources.resource_filename('ansible_kernel', 'roles')))
-            if not config.has_section('callback_ansible_kernel_helper'):
-                config.add_section('callback_ansible_kernel_helper')
-            config.set('callback_ansible_kernel_helper',
-                       'status_port', str(self.helper.status_socket_port))
             config.write(f)
-            logger.info("Wrote ansible.cfg")
+        logger.info("Wrote ansible.cfg")
 
     def rewrite_ports(self):
 
@@ -198,8 +262,10 @@ class AnsibleKernel(Kernel):
         with open(self.playbook_file, 'w') as f:
             f.write(yaml.safe_dump(playbook, default_flow_style=False))
 
-    def clean_up_task_files(self):
+    def clean_up_task_files(self, backup=False):
         for task_file in self.task_files:
+            if backup:
+                shutil.copy(task_file, task_file + ".bak")
             if os.path.exists(task_file):
                 os.unlink(task_file)
         self.task_files = []
@@ -247,8 +313,11 @@ class AnsibleKernel(Kernel):
                                                                  failed=False,
                                                                  unreachable=False,
                                                                  skipped=False,
+                                                                 application_python=self._format_application_python(results),
+                                                                 text_html=self._format_text_html(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
+                                                                 full_results=json.dumps(results),
                                                                  results=self._dump_results(results),
                                                                  task_id=task_uuid)]))
 
@@ -264,8 +333,11 @@ class AnsibleKernel(Kernel):
                                                                  unreachable=False,
                                                                  skipped=False,
                                                                  delegated_host_name=device_name,
+                                                                 application_python=self._format_application_python(results),
+                                                                 text_html=self._format_text_html(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
+                                                                 full_results=json.dumps(results),
                                                                  results=self._dump_results(results),
                                                                  task_id=task_uuid)]))
 
@@ -306,6 +378,10 @@ class AnsibleKernel(Kernel):
         if message_data.get('task_name', '') == 'pause_for_kernel':
             logger.debug('pause_for_kernel')
             return stop_processing
+        if message_data.get('task_name', '') == 'include_variables':
+            return stop_processing
+        if message_data.get('task_name', '') == 'include_vars':
+            return stop_processing
         if message_data.get('task_name', '') == 'include_tasks':
             logger.debug('include_tasks')
             if message_type == 'TaskStatus' and message_data.get('failed', False):
@@ -334,7 +410,7 @@ class AnsibleKernel(Kernel):
             logger.debug('PlaybookEnded')
             output = "\nPlaybook ended\nContext lost!\n"
             self.do_shutdown(False)
-            self.clean_up_task_files()
+            self.clean_up_task_files(True)
             self.start_helper()
             self.rewrite_ports()
             self.start_ansible_playbook()
@@ -354,6 +430,10 @@ class AnsibleKernel(Kernel):
                 logger.debug('ok')
                 output = 'ok: [%s]' % message_data['device_name']
 
+            if message_data.get('full_results', None) and self.registered_variable is not None:
+                self.shell.run_cell("{0} = json.loads('{1}')".format(self.registered_variable,
+                                                                     message_data.get('full_results')))
+
             if message_data.get('results', None):
                 output += " => "
                 output += message_data['results']
@@ -363,6 +443,12 @@ class AnsibleKernel(Kernel):
             if message_data.get('error', None):
                 output += "\n\n[%s] stderr:\n" % message_data['device_name']
                 output += message_data['error']
+            if message_data.get('application_python', None):
+                self.shell.run_cell(message_data.get('application_python'))
+            if message_data.get('text_html', None):
+                self.send_response(self.iopub_socket, 'display_data', dict(source="",
+                                                                           data={"text/html": message_data.get('text_html')}))
+
             output += "\n"
         elif message_type == 'Error':
             logger.debug('Error')
@@ -393,24 +479,50 @@ class AnsibleKernel(Kernel):
 
         logger.debug('code %r', code)
 
-        if code.strip().startswith("#inventory"):
-            return self.do_inventory(code)
-        elif code.strip().startswith("#ansible.cfg"):
-            return self.do_ansible_cfg(code)
-        elif code.strip().startswith("#host_vars"):
-            return self.do_host_vars(code)
-        elif code.strip().startswith("#group_vars"):
-            return self.do_group_vars(code)
-        elif code.strip().startswith("#vars"):
-            return self.do_vars(code)
-        elif code.strip().startswith("#template"):
-            return self.do_template(code)
-        elif code.strip().startswith("#task"):
-            return self.do_execute_task(code)
-        elif code.strip().startswith("#play"):
-            return self.do_execute_play(code)
-        else:
-            return self.do_execute_task(code)
+        try:
+
+            if code.strip().startswith("#inventory"):
+                return self.do_inventory(code)
+            elif code.strip().startswith("#ansible.cfg"):
+                return self.do_ansible_cfg(code)
+            elif code.strip().startswith("#host_vars"):
+                return self.do_host_vars(code)
+            elif code.strip().startswith("#group_vars"):
+                return self.do_group_vars(code)
+            elif code.strip().startswith("#vars"):
+                return self.do_vars(code)
+            elif code.strip().startswith("#template"):
+                return self.do_template(code)
+            elif code.strip().startswith("#task"):
+                return self.do_execute_task(code)
+            elif code.strip().startswith("#play"):
+                return self.do_execute_play(code)
+            elif code.strip().startswith("#python"):
+                return self.do_execute_python(code)
+            elif code.strip().startswith("#vault_password"):
+                return self.do_execute_vault_password(code)
+            else:
+                return self.do_execute_task(code)
+
+        except BaseException as e:
+            logger.error(traceback.format_exc())
+            reply = {'status': 'error', 'execution_count': self.execution_count,
+                     'payload': [], 'user_expressions': {}, 'traceback': traceback.format_exc().splitlines(), 'ename': type(e).__name__, 'evalue': str(e)}
+            self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error')) 
+            return reply
+
+    def send_traceback(self, e, limit=None):
+        reply = {'status': 'error', 'execution_count': self.execution_count,
+                 'payload': [], 'user_expressions': {}, 'traceback': traceback.format_exc(limit).splitlines(), 'ename': type(e).__name__, 'evalue': str(e)}
+        self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error')) 
+        return reply
+
+    def send_error(self, e, limit=None):
+        reply = {'status': 'error', 'execution_count': self.execution_count,
+                 'payload': [], 'user_expressions': {}, 'traceback': str(e).splitlines(), 'ename': type(e).__name__, 'evalue': str(e)}
+        self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error')) 
+        return reply
+
 
     def do_inventory(self, code):
         logger.info("inventory set to %s", code)
@@ -421,9 +533,13 @@ class AnsibleKernel(Kernel):
 
     def do_ansible_cfg(self, code):
         self.ansible_cfg = str(code)
-        config = configparser.SafeConfigParser()
-        if self.ansible_cfg is not None:
-            config.readfp(six.StringIO(self.ansible_cfg))
+        # Test that the code for ansible.cfg is parsable.  Do not write the file yet.
+        try:
+            config = configparser.SafeConfigParser()
+            if self.ansible_cfg is not None:
+                config.readfp(six.StringIO(self.ansible_cfg))
+        except configparser.ParsingError as e:
+            return self.send_error(e, 0)
         logger.info("ansible.cfg set to %s", code)
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
@@ -475,7 +591,7 @@ class AnsibleKernel(Kernel):
             self.do_shutdown(False)
         self.start_helper()
         code_data = yaml.load(code)
-        logger.debug('code_data %r %s', code_data)
+        logger.debug('code_data %r', code_data)
         logger.debug('code_data type: %s', type(code_data))
         self.current_play = code
 
@@ -495,6 +611,10 @@ class AnsibleKernel(Kernel):
         tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                            'port': self.helper.pause_socket_port,
                                            'task_num': self.tasks_counter - 1}})
+        widget_vars_file = os.path.join(self.temp_dir, 'project', 'widget_vars.yml')
+        with open(widget_vars_file, 'w') as f:
+            f.write(yaml.dump({}))
+        tasks.append({'include_vars': {'file': 'widget_vars.yml'}})
         tasks.append(
             {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter)})
 
@@ -527,6 +647,7 @@ class AnsibleKernel(Kernel):
         env['ANSIBLE_KERNEL_STATUS_PORT'] = str(self.helper.status_socket_port)
         self.runner_thread, self.runner = ansible_runner.run_async(private_data_dir=self.temp_dir,
                                                                    playbook="playbook.yml",
+                                                                   quiet=True,
                                                                    debug=True,
                                                                    ignore_logging=True,
                                                                    cancel_callback=self.cancel_callback,
@@ -563,6 +684,27 @@ class AnsibleKernel(Kernel):
         logger.info("done")
 
 
+    def process_widgets(self):
+
+        # Extract values from widgets
+        # Values in widgets with a var_name property are added to the vars file
+        # Values in widgets with a ansible_kernel_property are store into special variables
+        widget_vars_file = os.path.join(self.temp_dir, 'project', 'widget_vars.yml')
+        logger.debug("widget_vars_file %s", widget_vars_file)
+        widget_vars = {}
+        for widget in sorted(self.widgets.values(), key=lambda x: x['widget_update_order']):
+            logger.debug("widget %s", pformat(widget))
+            if 'var_name' in widget and 'value' in widget:
+                widget_vars[widget['var_name']] = widget['value']
+            if 'ansible_kernel_property' in widget and 'value' in widget:
+                if widget['ansible_kernel_property'] == 'vault_password':
+                    self.vault_password = widget['value']
+                    logger.debug("set vault_password")
+
+        # Save the vars from the widgets and include it for this task
+        with open(widget_vars_file, 'w') as f:
+            f.write(yaml.safe_dump(widget_vars, default_flow_style=False))
+
     def do_execute_task(self, code):
         if not self.is_ansible_alive():
             logger.info("ansible is dead")
@@ -574,6 +716,7 @@ class AnsibleKernel(Kernel):
             return {'status': 'ok', 'execution_count': self.execution_count,
                     'payload': [], 'user_expressions': {}}
 
+        self.registered_variable = None
         self.current_task = code
         try:
             code_data = yaml.load(code)
@@ -589,12 +732,13 @@ class AnsibleKernel(Kernel):
                 module = code_data.split()[-1]
             data = self.get_module_doc(module)
             payload = dict(
-                source='page',
-                data=data,
-                start=0)
+                source='',
+                data=data)
             logging.debug('payload %s', payload)
+            # content = {'name': 'stdout', 'text': str(payload)}
+            self.send_response(self.iopub_socket, 'display_data', payload)
             return {'status': 'ok', 'execution_count': self.execution_count,
-                    'payload': [payload], 'user_expressions': {}}
+                    'payload': [], 'user_expressions': {}}
         elif isinstance(code_data, list):
             code_data = code_data[0]
         elif isinstance(code_data, dict):
@@ -605,10 +749,28 @@ class AnsibleKernel(Kernel):
         else:
             logger.error('code_data %s unsupported type', type(code_data))
 
-        if isinstance(code_data, dict) and 'include_role' in code_data.keys():
+        if not isinstance(code_data, dict):
+            try:
+                code_data = yaml.load(code)
+                tb = []
+            except Exception:
+                tb = traceback.format_exc(1).splitlines()
+            reply = {'status': 'error', 'execution_count': self.execution_count,
+                     'payload': [], 'user_expressions': {},
+                     'traceback': ['Invalid task cell\n'] + tb,
+                     'ename': 'Invalid cell',
+                     'evalue': ''}
+            self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error'))
+            return reply
+
+
+        if 'include_role' in code_data.keys():
             role_name = code_data['include_role'].get('name', '')
             if '.' in role_name:
                 self.get_galaxy_role(role_name)
+
+        if 'register' in code_data.keys():
+            self.registered_variable = code_data['register']
 
         interrupted = False
         try:
@@ -621,6 +783,12 @@ class AnsibleKernel(Kernel):
             tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                                'port': self.helper.pause_socket_port,
                                                'task_num': self.tasks_counter}})
+
+
+            self.process_widgets()
+            tasks.append({'include_vars': {'file': 'widget_vars.yml'}})
+
+            # Create the include file task to look for the future task
             tasks.append(
                 {'include_tasks': 'next_task{0}.yml'.format(self.tasks_counter + 1)})
 
@@ -652,6 +820,36 @@ class AnsibleKernel(Kernel):
 
         if interrupted:
             return {'status': 'abort', 'execution_count': self.execution_count}
+
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
+
+    def do_execute_python(self, code):
+
+
+        code = "".join(code.splitlines(True)[1:])
+
+        reply_content = {}
+
+        res = self.shell.run_cell(code)
+
+        if res.success:
+            reply_content['status'] = 'ok'
+        else:
+            reply_content['status'] = 'error'
+
+        reply_content['execution_count'] = self.execution_count
+
+        reply_content['payload'] = self.shell.payload_manager.read_payload()
+        self.shell.payload_manager.clear_payload()
+
+        return reply_content
+
+    def do_execute_vault_password(self, code):
+
+        self.shell.run_cell("import ansible_kernel.widgets\n"
+                            "style = {'description_width': 'initial'}\n"
+                            "ansible_kernel.widgets.VaultPassword(description='Vault Password:', style=style)\n")
 
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
@@ -901,6 +1099,20 @@ class AnsibleKernel(Kernel):
 
         return {'status': 'ok', 'restart': restart}
 
+    def _format_application_python(self, result):
+        if 'application/x-python' in result:
+            ret_value = result['application/x-python']
+            del result['application/x-python']
+            return ret_value
+        return ""
+
+    def _format_text_html(self, result):
+        if 'text/html' in result:
+            ret_value = result['text/html']
+            del result['text/html']
+            return ret_value
+        return ""
+
     def _format_output(self, result):
         if 'stdout_lines' in result:
             return '\n'.join(result['stdout_lines'])
@@ -937,3 +1149,56 @@ class AnsibleKernel(Kernel):
         if 'reason' in r:
             return r['reason']
         return json.dumps(r, sort_keys=True, indent=4)
+
+    def set_parent(self, ident, parent):
+        super(AnsibleKernel, self).set_parent(ident, parent)
+        self.shell.set_parent(parent)
+
+    def send_multipart(self, msg, *args, **kwargs):
+        logger.debug('send_multipart %s %s %s %s', len(msg), msg, args, kwargs)
+        if len(msg) == 7:
+            msg0, msg1, msg2, msg3, msg4, msg5, msg6 = msg
+            logger.debug("msg0 %s", msg0)
+            logger.debug("msg1 %s", msg1)
+            logger.debug("msg2 %s", msg2)
+            logger.debug("msg3 %s", pformat(json.loads(msg3)))
+            logger.debug("msg4 %s", pformat(json.loads(msg4)))
+            logger.debug("msg5 %s", pformat(json.loads(msg5)))
+            logger.debug("msg6 %s", pformat(json.loads(msg6)))
+
+            msg3_data = json.loads(msg3)
+            msg6_data = json.loads(msg6)
+
+            if msg0.startswith("comm"):
+                _, _, comm_id = msg0.partition('-')
+                if msg3_data['msg_type'] == 'comm_open' and msg6_data['comm_id'] == comm_id:
+                    self.update_widget(comm_id, msg6_data.get('data', {}).get('state', {}))
+                    logger.debug("new widget %s %s", comm_id, pformat(self.widgets[comm_id]))
+
+                if msg3_data['msg_type'] == 'comm_msg' and msg6_data['comm_id'] == comm_id:
+                    if msg6_data.get('data', {}).get('method') == 'update':
+                        self.update_widget(comm_id, msg6_data.get('data', {}).get('state', {}))
+                        logger.debug("update widget %s %s", comm_id, pformat(self.widgets[comm_id]))
+
+    def update_widget(self, comm_id, state):
+        self.widgets[comm_id].update(state)
+        self.widgets[comm_id]['widget_update_order'] = self.widget_update_order
+        self.widget_update_order += 1
+
+    def comm_open(self, stream, ident, msg):
+        logger.debug("comm_open: %s %s", ident, msg)
+        self.comm_manager.comm_open(stream, ident, msg)
+
+    def comm_msg(self, stream, ident, msg):
+        logger.debug("comm_msg: %s %s", ident, msg)
+        logger.debug("msg %s", pformat(msg))
+
+        comm_id = msg.get('content', {}).get('comm_id', {})
+        if comm_id in self.widgets:
+            self.widgets[comm_id].update(msg.get('content', {}).get('data', {}).get('state', {}))
+            logger.debug("updated widget %s %s", comm_id, self.widgets[comm_id])
+        self.comm_manager.comm_msg(stream, ident, msg)
+
+    def comm_close(self, stream, ident, msg):
+        logger.debug("comm_close: %s %s", ident, msg)
+        self.comm_manager.comm_close(stream, ident, msg)
