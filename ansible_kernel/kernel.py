@@ -202,7 +202,7 @@ class AnsibleKernel(Kernel):
                                            name='default',
                                            gather_facts=False))
         self.temp_dir = tempfile.mkdtemp(prefix="ansible_kernel_playbook")
-        self.queue = queue.Queue()
+        self.queue = None
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
@@ -218,6 +218,7 @@ class AnsibleKernel(Kernel):
         logger.info("Kernel init finished took %s", time.time() - start_time)
 
     def start_helper(self):
+        self.queue = queue.Queue()
         self.helper = AnsibleKernelHelpersThread(self.queue)
         self.helper.start()
         self.process_widgets()
