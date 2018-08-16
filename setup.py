@@ -51,6 +51,7 @@ setup(
         'tqdm',
         'docopt',
         'six',
+        'ipywidgets',
     ],
     entry_points={
         "nbconvert.exporters" : [
