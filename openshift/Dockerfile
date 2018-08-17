@@ -27,7 +27,7 @@ RUN chmod -R u+x ${APP_ROOT}/bin && \
     chgrp -R 0 ${APP_ROOT} && \
     chmod -R g=u ${APP_ROOT} /etc/passwd
 
-RUN pip install --no-cache-dir ansible_kernel==0.7.0 && \
+RUN pip install --no-cache-dir ansible_kernel==0.8.0 && \
     python -m ansible_kernel.install
 USER ${NB_UID}
 WORKDIR ${APP_ROOT} 
