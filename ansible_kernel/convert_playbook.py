@@ -68,53 +68,52 @@ def main(args=None):
     host_vars_files_dir = parsed_args['--host-vars-files-dir']
     vars_files = parsed_args['<vars-file>']
     template_files = parsed_args['<template-file>']
-    print (parsed_args)
+    print(parsed_args)
     if not os.path.exists(playbook_file):
-        print ("No playbook file found at {0}".format(playbook_file))
+        print("No playbook file found at {0}".format(playbook_file))
         return 1
 
     if ansible_cfg is not None:
         ansible_cfg = os.path.abspath(ansible_cfg)
         if not os.path.exists(ansible_cfg):
-            print ("No ansible.cfg file found at {0}".format(ansible_cfg))
+            print("No ansible.cfg file found at {0}".format(ansible_cfg))
             return 1
 
     if inventory is not None:
         inventory = os.path.abspath(inventory)
         if not os.path.exists(inventory):
-            print ("No inventory file found at {0}".format(inventory))
+            print("No inventory file found at {0}".format(inventory))
             return 1
 
     if templates_dir is not None:
         if not os.path.exists(templates_dir):
-            print ("No templates directory found at {0}".format(templates_dir))
+            print("No templates directory found at {0}".format(templates_dir))
             return 1
 
     if vars_files_dir is not None:
         if not os.path.exists(vars_files_dir):
-            print ("No vars files directory found at {0}".format(vars_files_dir))
+            print("No vars files directory found at {0}".format(vars_files_dir))
             return 1
 
     if host_vars_files_dir is not None:
         if not os.path.exists(host_vars_files_dir):
-            print ("No host vars directory found at {0}".format(host_vars_files_dir))
+            print("No host vars directory found at {0}".format(host_vars_files_dir))
             return 1
 
     if group_vars_files_dir is not None:
         if not os.path.exists(group_vars_files_dir):
-            print ("No group vars directory found at {0}".format(group_vars_files_dir))
+            print("No group vars directory found at {0}".format(group_vars_files_dir))
             return 1
     if vars_files is not None:
         for vars_file in vars_files:
             if not os.path.exists(vars_file):
-                print ("No vars file found at {0}".format(vars_file))
+                print("No vars file found at {0}".format(vars_file))
                 return 1
     if template_files is not None:
         for template_file in template_files:
             if not os.path.exists(template_file):
-                print ("No template file found at {0}".format(vars_file))
+                print("No template file found at {0}".format(vars_file))
                 return 1
-
 
     if parsed_args['<output>'] is not None:
         output_file = os.path.abspath(parsed_args['<output>'])
@@ -135,9 +134,8 @@ def main(args=None):
                         execution_count=None,
                         outputs=[],
                         source=source.splitlines(True))
-        print (new_cell)
+        print(new_cell)
         cells.append(new_cell)
-
 
     if ansible_cfg is not None:
         with open(ansible_cfg) as f:
@@ -177,7 +175,6 @@ def main(args=None):
             with open(host_vars) as f:
                 add_code_cell('host_vars {0}'.format(host_vars), f.read())
 
-
     for play in plays:
         play_copy = play.copy()
         if 'tasks' in play_copy:
@@ -185,7 +182,6 @@ def main(args=None):
         add_code_cell('play', yaml_dump(play_copy))
         for task in play.get('tasks', []):
             add_code_cell('task', yaml_dump(task))
-
 
     with open(output_file, 'w') as f:
         f.write(json_dump(dict(cells=cells,

@@ -68,19 +68,18 @@ class CallbackModule(CallbackBase):
                 r['stdout'] = '[see below]'
         if 'stdout_lines' in r:
             if r['stdout_lines']:
-                r['stdout_lines']  = '[removed for clarity]'
+                r['stdout_lines'] = '[removed for clarity]'
         if 'stderr' in r:
             if r['stderr']:
                 r['stderr'] = '[see below]'
         if 'stderr_lines' in r:
             if r['stderr_lines']:
-                r['stderr_lines']  = '[removed for clarity]'
+                r['stderr_lines'] = '[removed for clarity]'
         if 'changed' in r:
             del r['changed']
         if 'reason' in r:
             return r['reason']
         return super(CallbackModule, self)._dump_results(r, indent=4, sort_keys=True)
-
 
     @debug
     def v2_playbook_on_setup(self):

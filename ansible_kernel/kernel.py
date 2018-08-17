@@ -359,10 +359,8 @@ class AnsibleKernel(Kernel):
                                       text="{}\n".format(pprint.pformat(data)))
                 self.send_response(self.iopub_socket, 'stream', stream_content)
 
-
         except BaseException:
             logger.error(traceback.format_exc())
-
 
     def process_message(self, message):
         logger.info("message %s", message)
@@ -509,21 +507,20 @@ class AnsibleKernel(Kernel):
             logger.error(traceback.format_exc())
             reply = {'status': 'error', 'execution_count': self.execution_count,
                      'payload': [], 'user_expressions': {}, 'traceback': traceback.format_exc().splitlines(), 'ename': type(e).__name__, 'evalue': str(e)}
-            self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error')) 
+            self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error'))
             return reply
 
     def send_traceback(self, e, limit=None):
         reply = {'status': 'error', 'execution_count': self.execution_count,
                  'payload': [], 'user_expressions': {}, 'traceback': traceback.format_exc(limit).splitlines(), 'ename': type(e).__name__, 'evalue': str(e)}
-        self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error')) 
+        self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error'))
         return reply
 
     def send_error(self, e, limit=None):
         reply = {'status': 'error', 'execution_count': self.execution_count,
                  'payload': [], 'user_expressions': {}, 'traceback': str(e).splitlines(), 'ename': type(e).__name__, 'evalue': str(e)}
-        self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error')) 
+        self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error'))
         return reply
-
 
     def do_inventory(self, code):
         logger.info("inventory set to %s", code)
@@ -637,12 +634,10 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def start_ansible_playbook(self):
-        #We may need to purge artifacts when we start again
+        # We may need to purge artifacts when we start again
         if os.path.exists(os.path.join(self.temp_dir, 'artifacts')):
             shutil.rmtree(os.path.join(self.temp_dir, 'artifacts'))
 
-        #command = ['ansible-playbook', 'playbook.yml']
-        #logger.info("command %s", command)
         logger.info("runner starting")
         env = os.environ.copy()
         env['ANSIBLE_KERNEL_STATUS_PORT'] = str(self.helper.status_socket_port)
@@ -683,7 +678,6 @@ class AnsibleKernel(Kernel):
         self.clean_up_task_files()
 
         logger.info("done")
-
 
     def process_widgets(self):
 
@@ -764,7 +758,6 @@ class AnsibleKernel(Kernel):
             self.send_response(self.iopub_socket, 'error', reply, ident=self._topic('error'))
             return reply
 
-
         if 'include_role' in code_data.keys():
             role_name = code_data['include_role'].get('name', '')
             if '.' in role_name:
@@ -784,7 +777,6 @@ class AnsibleKernel(Kernel):
             tasks.append({'pause_for_kernel': {'host': '127.0.0.1',
                                                'port': self.helper.pause_socket_port,
                                                'task_num': self.tasks_counter}})
-
 
             self.process_widgets()
             tasks.append({'include_vars': {'file': 'widget_vars.yml'}})
@@ -826,7 +818,6 @@ class AnsibleKernel(Kernel):
                 'payload': [], 'user_expressions': {}}
 
     def do_execute_python(self, code):
-
 
         code = "".join(code.splitlines(True)[1:])
 
@@ -1039,7 +1030,6 @@ class AnsibleKernel(Kernel):
         stream_content = {'name': 'stdout', 'text': str(output)}
         self.send_response(self.iopub_socket, 'stream', stream_content)
 
-
     def get_module_doc(self, module):
 
         data = {}
@@ -1078,7 +1068,6 @@ class AnsibleKernel(Kernel):
             self.queue.put(StatusMessage(['PlaybookEnded', {}]))
 
     def do_shutdown(self, restart):
-
 
         if self.is_ansible_alive():
             self.shutdown = False
@@ -1138,13 +1127,13 @@ class AnsibleKernel(Kernel):
                 r['stdout'] = '[see below]'
         if 'stdout_lines' in r:
             if r['stdout_lines']:
-                r['stdout_lines']  = '[removed for clarity]'
+                r['stdout_lines'] = '[removed for clarity]'
         if 'stderr' in r:
             if r['stderr']:
                 r['stderr'] = '[see below]'
         if 'stderr_lines' in r:
             if r['stderr_lines']:
-                r['stderr_lines']  = '[removed for clarity]'
+                r['stderr_lines'] = '[removed for clarity]'
         if 'changed' in r:
             del r['changed']
         if 'reason' in r:

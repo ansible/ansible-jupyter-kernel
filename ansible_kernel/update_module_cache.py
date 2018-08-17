@@ -89,7 +89,6 @@ def main(args=None):
     with open(pkg_resources.resource_filename('ansible_kernel', 'module_args.yml'), 'w') as f:
         f.write(yaml.safe_dump(module_args, default_flow_style=False))
 
-
     return 0
 
 

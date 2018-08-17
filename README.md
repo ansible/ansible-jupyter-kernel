@@ -2,6 +2,8 @@
 
 [![Binder](https://mybinder.org/badge.svg)](https://mybinder.org/v2/gh/ansible/ansible-jupyter-kernel/master)
 
+[![Build Status](https://travis-ci.org/benthomasson/ansible-jupyter-kernel.svg?branch=master)](https://travis-ci.org/benthomasson/ansible-jupyter-kernel)
+
 
 ![Example Jupyter Usage](https://raw.githubusercontent.com/ansible/ansible-jupyter-kernel/master/docs/example_session.png)
 

@@ -27,7 +27,6 @@ class Installer(install):
             ksm.install_kernel_spec(td, 'ansible', user=self.user, replace=True, prefix=self.prefix)
 
 
-
 with open('README.md', 'r') as f:
     long_description = f.read()
 
@@ -55,7 +54,7 @@ setup(
         'ipywidgets',
     ],
     entry_points={
-        "nbconvert.exporters" : [
+        "nbconvert.exporters": [
             'ansible_tasks=ansible_kernel.exporters:AnsibleTasksExporter',
             'ansible_playbook=ansible_kernel.exporters:AnsiblePlaybookExporter',
             'ansible_zip=ansible_kernel.exporters:AnsibleZipExporter']

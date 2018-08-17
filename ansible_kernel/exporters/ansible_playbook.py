@@ -26,4 +26,3 @@ class AnsiblePlaybookExporter(TemplateExporter):
     @property
     def template_path(self):
         return super(AnsiblePlaybookExporter, self).template_path + [os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")]
-
