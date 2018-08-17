@@ -27,8 +27,6 @@ class AnsibleZipExporter(Exporter):
     def from_notebook_node(self, nb, resources=None, **kw):
         nb_copy, resources = super(AnsibleZipExporter, self).from_notebook_node(nb, resources, **kw)
 
-        print (nb_copy)
-
         resources_copy = resources.copy()
 
         contents = six.BytesIO()
@@ -46,7 +44,6 @@ class AnsibleZipExporter(Exporter):
             return source[0][len(prefix):].strip()
 
         for cell in nb_copy.get('cells', []):
-            print (cell)
             source = cell.get('source', '').strip().splitlines()
             if len(source) > 0:
                 if source[0].startswith("#inventory"):

@@ -11,6 +11,7 @@ Options:
     --debug            Show debug logging
     --verbose        Show verbose logging
 """
+from __future__ import print_function
 from docopt import docopt
 import logging
 import sys
@@ -65,7 +66,7 @@ def main(args=None):
         logging.basicConfig(level=logging.INFO)
     else:
         logging.basicConfig(level=logging.WARNING)
-    print ("Updating module cache")
+    print("Updating module cache")
     p = Popen(['ansible-doc', '-t', 'module', '-l'],
               stdout=PIPE, stderr=STDOUT)
     output = p.communicate()[0]
