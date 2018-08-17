@@ -5,3 +5,5 @@ python:
   - "3.6"
 install:
   - pip install -e .
+script:
+  - flake8 .
