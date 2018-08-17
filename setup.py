@@ -33,7 +33,7 @@ with open('README.md', 'r') as f:
 
 setup(
     name='ansible-kernel',
-    version='0.7.0',
+    version='0.8.0',
     description='An Ansible kernel for Jupyter',
     long_description=long_description,
     packages=find_packages(),
@@ -45,6 +45,7 @@ setup(
     license='Apache',
     install_requires=[
         'ansible',
+        'ansible-runner>=1.1.0',
         'PyYAML',
         'psutil',
         'jupyter',

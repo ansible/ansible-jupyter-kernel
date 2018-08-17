@@ -1,10 +1,23 @@
 # Changelog
 
-## Unreleased
+## [0.8.0] - 2018-08-17
+
+
+### Added
+
+- Support for #vault_password cells
+- Support for #python cells with access to registered variables
+- Support for ipywidgets from #python cells and #task cells
+- Support for rendering HTML from ansible modules that return `text/html`
 
 ### Changed
 
 - Use ansible-runner to manage ansible-playbook calls
+
+### Fixes
+
+- Issue where kernel needed to be restarted after a play context is lost
+    and could not be restarted.
 
 ## [0.7.0] - 2018-07-31
 

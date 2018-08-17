@@ -48,7 +48,7 @@ TaskCompletionMessage = namedtuple('TaskCompletionMessage', ['task_num'])
 
 TASK_ARGS_MODULES = modules + task_args
 
-__version__ = '0.7.0'
+__version__ = '0.8.0'
 
 logger = logging.getLogger('ansible_kernel.kernel')
 
@@ -317,7 +317,7 @@ class AnsibleKernel(Kernel):
                                                                  text_html=self._format_text_html(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
-                                                                 full_results=json.dumps(results),
+                                                                 full_results=json.dumps(results).replace('\\', '\\\\'),
                                                                  results=self._dump_results(results),
                                                                  task_id=task_uuid)]))
 
@@ -337,7 +337,7 @@ class AnsibleKernel(Kernel):
                                                                  text_html=self._format_text_html(results),
                                                                  output=self._format_output(results),
                                                                  error=self._format_error(results),
-                                                                 full_results=json.dumps(results),
+                                                                 full_results=json.dumps(results).replace('\\', '\\\\'),
                                                                  results=self._dump_results(results),
                                                                  task_id=task_uuid)]))
 
@@ -431,6 +431,7 @@ class AnsibleKernel(Kernel):
                 output = 'ok: [%s]' % message_data['device_name']
 
             if message_data.get('full_results', None) and self.registered_variable is not None:
+                logger.debug('full_results %s', type(message_data.get('full_results')))
                 self.shell.run_cell("{0} = json.loads('{1}')".format(self.registered_variable,
                                                                      message_data.get('full_results')))
 
