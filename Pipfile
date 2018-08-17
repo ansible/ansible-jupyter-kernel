@@ -16,5 +16,7 @@ pytest = "*"
 backports-abc = "*"
 defusedxml = "*"
 ansible-runner = "*"
+ipywidgets = "*"
+cryptography = ">=2.3"
 
 [dev-packages]
