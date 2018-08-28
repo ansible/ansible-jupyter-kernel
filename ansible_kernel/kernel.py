@@ -1170,7 +1170,7 @@ class AnsibleKernel(Kernel):
             msg3_data = json.loads(msg3)
             msg6_data = json.loads(msg6)
 
-            if msg0.startswith("comm"):
+            if msg0.startswith(b"comm"):
                 _, _, comm_id = msg0.partition('-')
                 if msg3_data['msg_type'] == 'comm_open' and msg6_data['comm_id'] == comm_id:
                     self.update_widget(comm_id, msg6_data.get('data', {}).get('state', {}))
