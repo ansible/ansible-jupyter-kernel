@@ -430,8 +430,8 @@ class AnsibleKernel(Kernel):
 
             if message_data.get('full_results', None) and self.registered_variable is not None:
                 logger.debug('full_results %s', type(message_data.get('full_results')))
-                self.shell.run_cell("{0} = json.loads('{1}')".format(self.registered_variable,
-                                                                     message_data.get('full_results')))
+                self.shell.run_cell("import json; {0} = json.loads('{1}')".format(self.registered_variable,
+                                                                                  message_data.get('full_results')))
 
             if message_data.get('results', None):
                 output += " => "
