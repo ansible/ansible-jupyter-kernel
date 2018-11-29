@@ -2,6 +2,7 @@ from __future__ import print_function
 from ipykernel.kernelbase import Kernel
 from ipykernel.comm import CommManager
 from ipykernel.zmqshell import ZMQInteractiveShell
+from IPython.core.display_trap import DisplayTrap
 
 from subprocess import check_output
 
@@ -55,6 +56,20 @@ logger = logging.getLogger('ansible_kernel.kernel')
 version_pat = re.compile(r'version (\d+(\.\d+)+)')
 
 DEBUG = False
+
+
+class _NullDisplay(object):
+
+    def __init__(self):
+        self.exec_result = None
+
+    def __call__(self, result):
+        logger.debug("NullDisplay %s", result)
+        self.exec_result = result
+
+
+NullDisplay = _NullDisplay()
+NullDisplayTrap = DisplayTrap(hook=NullDisplay)
 
 
 class Splitter(object):
@@ -825,6 +840,8 @@ class AnsibleKernel(Kernel):
 
         res = self.shell.run_cell(code)
 
+        logger.debug('do_execute_python res %s', pformat(res))
+
         if res.success:
             reply_content['status'] = 'ok'
         else:
@@ -835,7 +852,47 @@ class AnsibleKernel(Kernel):
         reply_content['payload'] = self.shell.payload_manager.read_payload()
         self.shell.payload_manager.clear_payload()
 
+        self.export_python_variables()
+
         return reply_content
+
+    def export_python_variables(self):
+
+        try:
+            self.silent = True
+            original_display_trap = self.shell.display_trap
+            self.shell.display_trap = NullDisplayTrap
+
+            line1 = "import types"
+            line2 = "import json"
+            line3 = "json.dumps([_x for _x, _v in globals().items() if not _x.startswith('_') and _x not in ['In', 'Out', 'quit', 'pprint', 'exit', 'get_ipython'] and not isinstance(_v, types.ModuleType)])"
+
+            for line in [line1, line2, line3]:
+                res = self.shell.run_cell(line)
+
+            logger.debug('export_python_variables res %s', pformat(res))
+            logger.debug('export_python_variables NullDisplay %s', pformat(NullDisplay.exec_result))
+
+            variable_values = dict()
+
+            if res.success and NullDisplay.exec_result:
+                logger.debug('export_python_variables %s', pformat(json.loads(NullDisplay.exec_result)))
+                variable_names = json.loads(NullDisplay.exec_result)
+                NullDisplay.exec_result = None
+                for variable in variable_names:
+                    res = self.shell.run_cell('json.dumps({0})'.format(variable))
+                    if res.success and NullDisplay.exec_result:
+                        variable_values[variable] = json.loads(NullDisplay.exec_result)
+                        NullDisplay.exec_result = None
+            else:
+                logger.debug('export_python_variables error')
+
+            logger.debug('export_python_variables variable_values %s', pformat(variable_values))
+
+            self.do_execute_task(yaml.dump(dict(set_fact=variable_values)))
+        finally:
+            self.silent = False
+            self.shell.display_trap = original_display_trap
 
     def do_execute_vault_password(self, code):
 
