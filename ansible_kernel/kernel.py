@@ -865,7 +865,10 @@ class AnsibleKernel(Kernel):
 
             line1 = "import types"
             line2 = "import json"
-            line3 = "json.dumps([_x for _x, _v in globals().items() if not _x.startswith('_') and _x not in ['In', 'Out', 'quit', 'pprint', 'exit', 'get_ipython'] and not isinstance(_v, types.ModuleType)])"
+            line3 = "json.dumps([_x for _x, _v in globals().items() if " \
+                    "not _x.startswith('_') and " \
+                    "_x not in ['In', 'Out', 'quit', 'pprint', 'exit', 'get_ipython'] and " \
+                    "not isinstance(_v, types.ModuleType)])"
 
             for line in [line1, line2, line3]:
                 res = self.shell.run_cell(line)
