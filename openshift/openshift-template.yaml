@@ -12,17 +12,17 @@ objects:
 - apiVersion: v1
   kind: ImageStream
   metadata:
-    name: centos 
+    name: fedora 
 - apiVersion: image.openshift.io/v1
   kind: ImageStreamTag
   metadata:
-    name: centos:7
+    name: fedora:29 
   tag:
     from:
       kind: DockerImage
-      name: centos:7
+      name: fedora:29
     importPolicy: {}
-    name: "7"
+    name: "29"
     referencePolicy:
       type: Source
 - apiVersion: v1
@@ -130,7 +130,7 @@ objects:
       dockerStrategy:
         from:
           kind: ImageStreamTag
-          name: centos:7
+          name: fedora:29
       type: Docker
     triggers:
     - type: ConfigChange
