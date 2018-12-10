@@ -58,6 +58,11 @@ version_pat = re.compile(r'version (\d+(\.\d+)+)')
 DEBUG = False
 
 
+def ensure_directory(d):
+    if not os.path.exists(d):
+        os.mkdir(d)
+
+
 class _NullDisplay(object):
 
     def __init__(self):
@@ -221,9 +226,10 @@ class AnsibleKernel(Kernel):
         self.tasks_counter = 0
         self.current_task = None
         logger.debug(self.temp_dir)
-        os.mkdir(os.path.join(self.temp_dir, 'env'))
-        os.mkdir(os.path.join(self.temp_dir, 'project'))
-        os.mkdir(os.path.join(self.temp_dir, 'project', 'roles'))
+        ensure_directory(os.path.join(self.temp_dir, 'env'))
+        ensure_directory(os.path.join(self.temp_dir, 'project'))
+        self.copy_files()
+        ensure_directory(os.path.join(self.temp_dir, 'project', 'roles'))
         with open(os.path.join(self.temp_dir, 'env', 'settings'), 'w') as f:
             f.write(json.dumps(dict(idle_timeout=0,
                                     job_timeout=0)))
@@ -231,6 +237,17 @@ class AnsibleKernel(Kernel):
         self.shell.run_code("import json")
         self.do_execute_play(self.default_play)
         logger.info("Kernel init finished took %s", time.time() - start_time)
+
+    def copy_files(self):
+        src = os.path.abspath('.')
+        dest = os.path.join(self.temp_dir, 'project')
+        src_files = os.listdir(src)
+        for file_name in src_files:
+            full_file_name = os.path.join(src, file_name)
+            if (os.path.isfile(full_file_name)):
+                shutil.copy(full_file_name, dest)
+            if (os.path.isdir(full_file_name)):
+                shutil.copytree(full_file_name, os.path.join(dest, file_name))
 
     def start_helper(self):
         self.queue = queue.Queue()
