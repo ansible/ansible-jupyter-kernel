@@ -57,6 +57,7 @@ version_pat = re.compile(r'version (\d+(\.\d+)+)')
 
 DEBUG = False
 
+
 def ensure_directory(d):
     if not os.path.exists(d):
         os.mkdir(d)
@@ -247,7 +248,6 @@ class AnsibleKernel(Kernel):
                 shutil.copy(full_file_name, dest)
             if (os.path.isdir(full_file_name)):
                 shutil.copytree(full_file_name, os.path.join(dest, file_name))
-
 
     def start_helper(self):
         self.queue = queue.Queue()
