@@ -1,10 +1,15 @@
-FROM fedora:29
+FROM centos:7
 
-RUN dnf install -y python2-ipykernel python2-jupyter-core gcc python2-devel \
-    bzip2 openssh openssh-clients python2-crypto python2-psutil glibc-locale-source && \
+# Install Ansible Jupyter Kernel
+RUN yum -y install epel-release  && \
+    yum -y install ansible python-psutil python-pip bzip2 python-crypto openssh openssh-clients gcc python-devel.x86_64 && \
     localedef -c -i en_US -f UTF-8 en_US.UTF-8 && \
     pip install --no-cache-dir wheel psutil && \
     rm -rf /var/cache/yum
+
+RUN pip install --no-cache-dir prompt-toolkit==1.0.15
+RUN pip install --no-cache-dir ipython==5.7
+RUN pip install --no-cache-dir ipykernel==4.10 
 
 ENV LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
