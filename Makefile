@@ -28,3 +28,15 @@ dev:
 
 shell:
 	pipenv shell
+
+docker:
+	docker build -t benthomasson/ansible-jupyter-kernel:latest .
+
+docker-dev: dist
+	docker build  -t benthomasson/ansible-jupyter-kernel:dev -f Dockerfile.dev .
+
+docker-run:
+	docker run -it -p 8888:8888 benthomasson/ansible-jupyter-kernel:latest
+
+docker-run-dev:
+	docker run -it -p 8888:8888 benthomasson/ansible-jupyter-kernel:dev
