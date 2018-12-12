@@ -11,7 +11,7 @@ The Ansible [Jupyter](http://jupyter.readthedocs.io/en/latest/) Kernel adds a ke
 
 ## Demo
 
-[![Demo](https://raw.githubusercontent.com/ansible/ansible-jupyter-kernel/master/docs/ansible_jupyter_kernel_vimeo.png)](https://vimeo.com/279049946 "Run Ansible Tasks from Jupyter Notebook - Click to Watch!")
+[![Demo](https://raw.githubusercontent.com/ansible/ansible-jupyter-kernel/master/docs/ansible_jupyter_kernel_vimeo.png)](https://vimeo.com/279049946 "Run Ansible Tasks from Jupyter Notebook - Click to Watch!") [![Join the chat at https://gitter.im/ansible/ansible-jupyter-kernel](https://badges.gitter.im/ansible/ansible-jupyter-kernel.svg)](https://gitter.im/ansible/ansible-jupyter-kernel?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 
 ## Table of Contents
