@@ -25,7 +25,8 @@ COPY . ${HOME}
 USER root
 RUN chown -R ${NB_UID} ${HOME}
 
-RUN pip install --no-cache-dir ansible_kernel==0.8.0 && \
+RUN pip install --no-cache-dir ansible-jupyter-widgets
+RUN pip install --no-cache-dir ansible_kernel==0.9.0 && \
     python -m ansible_kernel.install
 USER ${NB_USER}
 WORKDIR /home/notebook/notebooks
