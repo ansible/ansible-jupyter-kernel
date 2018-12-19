@@ -6,7 +6,7 @@ name = "pypi"
 [packages]
 pyyaml = "*"
 jupyter = "*"
-notebook = "*"
+notebook = ">=5.7.2"
 pyzmq = "*"
 tornado = "*"
 jupyter-nbextensions-configurator = "*"
