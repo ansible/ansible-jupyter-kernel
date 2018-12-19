@@ -18,5 +18,6 @@ defusedxml = "*"
 ansible-runner = "*"
 ipywidgets = "*"
 cryptography = ">=2.3"
+paramiko = ">=2.4.2"
 
 [dev-packages]
