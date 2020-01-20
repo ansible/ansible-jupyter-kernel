@@ -123,7 +123,7 @@ def main(args=None):
 
     with open(playbook_file) as f:
         content = f.read()
-        plays = yaml.load(content)
+        plays = yaml.load(content, Loader=yaml.FullLoader)
 
     cells = []
 
