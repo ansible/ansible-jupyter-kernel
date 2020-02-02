@@ -324,6 +324,8 @@ class AnsibleKernel(Kernel):
                 pass
             elif event == 'playbook_on_include':
                 pass
+            elif event == 'runner_on_start':
+                pass
             elif event == 'playbook_on_task_start':
                 logger.debug('playbook_on_task_start')
                 task_args = event_data.get('task_args', [])
