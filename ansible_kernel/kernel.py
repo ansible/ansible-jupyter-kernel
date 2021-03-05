@@ -182,6 +182,7 @@ class AnsibleKernel(Kernel):
         self.original_iopub_socket = self.iopub_socket
 
         self.iopub_socket = Splitter([self.original_iopub_socket, self])
+        self.user_ns = {}
 
         self.shell = self.shell_class.instance(parent=self,
                                                profile_dir=self.profile_dir,
