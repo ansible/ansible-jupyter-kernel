@@ -1228,7 +1228,7 @@ class AnsibleKernel(Kernel):
             return r['reason']
         return json.dumps(r, sort_keys=True, indent=4)
 
-    def set_parent(self, ident, parent):
+    def set_parent(self, ident, parent, channel):
         super(AnsibleKernel, self).set_parent(ident, parent)
         self.shell.set_parent(parent)
 
