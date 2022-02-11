@@ -27,14 +27,12 @@ class Installer(install):
             ksm.install_kernel_spec(td, 'ansible', user=self.user, replace=True, prefix=self.prefix)
 
 
-with open('README.md', 'r') as f:
-    long_description = f.read()
-
 setup(
     name='ansible-kernel',
     version='1.0.0',
-    description='An Ansible kernel for Jupyter',
-    long_description=long_description,
+    description='An Ansible kernel for Jupyter notebooks',
+    long_description='An Ansible kernel for Jupyter notebooks',
+    long_description_content_type='text/plain',
     packages=find_packages(),
     package_data={'ansible_kernel': ['templates/ansible_playbook.tpl',
                                      'templates/ansible_tasks.tpl',
