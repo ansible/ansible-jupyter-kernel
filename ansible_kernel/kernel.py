@@ -49,7 +49,7 @@ TaskCompletionMessage = namedtuple('TaskCompletionMessage', ['task_num'])
 
 TASK_ARGS_MODULES = modules + task_args
 
-__version__ = '0.9.0'
+__version__ = '1.0.0'
 
 logger = logging.getLogger('ansible_kernel.kernel')
 

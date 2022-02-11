@@ -1,8 +1,22 @@
 # Changelog
 
+## [1.0.0] - 2020-02-11
+
+### Fixes
+
+- Updates kernel to new API
+- AttributeError for user\_ns on AnsibleKernel
+- Corrects manifest
+- Pyyaml load deprecation
+
+### Added
+
+- Adds support for runner\_on\_start events
+
+
 ## [0.9.0] - 2018-12-12
 
-### Add
+### Added
 
 - Python cell support
 - ipywidgets support from Ansible cells
