@@ -524,7 +524,7 @@ class AnsibleKernel(Kernel):
         try:
 
             if code.strip().startswith("#inventory"):
-                return self.do_inventory(code)
+           False     return self.do_inventory(code)
             elif code.strip().startswith("#ansible.cfg"):
                 return self.do_ansible_cfg(code)
             elif code.strip().startswith("#host_vars"):
@@ -543,6 +543,8 @@ class AnsibleKernel(Kernel):
                 return self.do_execute_python(code)
             elif code.strip().startswith("#vault_password"):
                 return self.do_execute_vault_password(code)
+            elif code.strip().startswith("#summary"):
+                return self.do_execute_summary(code)
             else:
                 return self.do_execute_task(code)
 
@@ -934,6 +936,17 @@ class AnsibleKernel(Kernel):
         return {'status': 'ok', 'execution_count': self.execution_count,
                 'payload': [], 'user_expressions': {}}
 
+    def do_execute_summary(self, code):
+
+        self.do_shutdown(False)
+        stream_content = dict(name='stdout',
+                              text="summary ansible shutdown")
+        self.send_response(self.iopub_socket, 'stream', stream_content)
+
+
+        return {'status': 'ok', 'execution_count': self.execution_count,
+                'payload': [], 'user_expressions': {}}
+
     def do_complete(self, code, cursor_pos):
         code = code[:cursor_pos]
         default = {'matches': [], 'cursor_start': 0,
@@ -1056,7 +1069,7 @@ class AnsibleKernel(Kernel):
         logger.debug("detail_level %s", detail_level)
 
         if code.strip().startswith("#inventory"):
-            logger.info("#inentory not supported")
+            logger.info("#inventory not supported")
             return {'status': 'ok', 'data': {}, 'metadata': {}, 'found': True}
         elif code.strip().startswith("#task"):
             return self.do_inspect_module(code, cursor_pos, detail_level)
@@ -1106,7 +1119,6 @@ class AnsibleKernel(Kernel):
                 if role == role_name:
                     return
 
-        p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT, )
         command = ['ansible-galaxy', 'install', '-p', 'project/roles', role_name]
         logger.debug("command %s", command)
         p = Popen(command, cwd=self.temp_dir, stdout=PIPE, stderr=STDOUT, )
